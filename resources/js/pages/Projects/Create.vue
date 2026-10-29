@@ -11,6 +11,7 @@ const form = useForm({
     language: props.languages[0]?.value ?? 'php',
     framework: '',
     repository_url: '',
+    repository_branch: '',
     budget_limit_usd: props.defaultBudget,
     start: false,
 });
@@ -32,7 +33,7 @@ const submit = (start) => form.transform((d) => ({ ...d, start })).post('/projec
         </div>
 
         <div>
-            <label class="label">Brief — what should it do?</label>
+            <label class="label">Brief — what should it do?<span v-if="form.repository_url" class="ml-1 normal-case text-stone-400">(optional with a repository)</span></label>
             <textarea v-model="form.brief" rows="8" class="input" placeholder="Users upload invoices; the system emails reminders 3 days before and 1 day after the due date…"></textarea>
             <p v-if="form.errors.brief" class="mt-1 text-xs text-red-600">{{ form.errors.brief }}</p>
         </div>
@@ -41,18 +42,26 @@ const submit = (start) => form.transform((d) => ({ ...d, start })).post('/projec
             <div>
                 <label class="label">Language / stack</label>
                 <select v-model="form.language" class="input">
+                    <option value="auto">Auto-detect from repository</option>
                     <option v-for="l in languages" :key="l.value" :value="l.value">{{ l.label }}</option>
                 </select>
                 <p v-if="selected" class="mt-1 text-xs text-stone-500">Tests run in <code>{{ selected.image }}</code> with <code>{{ selected.test }}</code></p>
+                <p v-if="form.errors.language" class="mt-1 text-xs text-red-600">{{ form.errors.language }}</p>
             </div>
             <div>
                 <label class="label">Framework (optional)</label>
                 <input v-model="form.framework" class="input" placeholder="Laravel, Express, FastAPI, Gin…" />
             </div>
             <div>
-                <label class="label">GitHub repository (optional)</label>
+                <label class="label">Existing repository (optional)</label>
                 <input v-model="form.repository_url" class="input" placeholder="https://github.com/org/repo" />
                 <p v-if="form.errors.repository_url" class="mt-1 text-xs text-red-600">{{ form.errors.repository_url }}</p>
+                <p v-else class="mt-1 text-xs text-stone-500">If it already has code, the factory imports and assesses it first, then asks where to resume — it won’t rebuild what exists.</p>
+            </div>
+            <div v-if="form.repository_url">
+                <label class="label">Branch (optional)</label>
+                <input v-model="form.repository_branch" class="input" placeholder="default branch" />
+                <p v-if="form.errors.repository_branch" class="mt-1 text-xs text-red-600">{{ form.errors.repository_branch }}</p>
             </div>
             <div>
                 <label class="label">Budget limit (USD)</label>

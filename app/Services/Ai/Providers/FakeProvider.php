@@ -15,6 +15,7 @@ class FakeProvider implements AiProvider
     public function complete(CompletionRequest $request): CompletionResponse
     {
         $content = match ($request->step) {
+            'project_assessment' => json_encode($this->assessment($request->prompt), JSON_PRETTY_PRINT),
             'requirements_analysis' => $this->requirements(),
             'architecture_design' => $this->architecture(),
             'task_breakdown' => json_encode($this->breakdown(), JSON_PRETTY_PRINT),
@@ -42,6 +43,34 @@ class FakeProvider implements AiProvider
             (int) ceil(strlen($request->prompt.$request->system) / 4),
             (int) ceil(strlen($content) / 4),
         );
+    }
+
+    /** Reads the facts out of the inventory JSON in the prompt, so behaviour tracks the repository. */
+    private function assessment(string $prompt): array
+    {
+        $flag = fn (string $key) => (bool) preg_match('/"'.$key.'":\s*true/', $prompt);
+        $tests = preg_match('/"test_file_count":\s*(\d+)/', $prompt, $m) ? (int) $m[1] : 0;
+        $readme = $flag('has_readme');
+        $docs = $flag('has_docs');
+
+        $tasks = $tests === 0 ? [
+            ['title' => 'Characterize existing behaviour', 'type' => 'characterization', 'description' => 'Add tests that pin down what the current code does.', 'acceptance_criteria' => ['Tests pass against current code'], 'files' => ['tests/CharacterizationTest.txt']],
+            ['title' => 'Add missing feature', 'type' => 'feature', 'description' => 'Implement the feature the repository lacks.', 'acceptance_criteria' => ['New behaviour is covered by a failing-then-passing test'], 'files' => ['src/feature.txt']],
+        ] : [];
+
+        return [
+            'summary' => '[fake] Imported repository assessed from its inventory.',
+            'detected' => ['language' => null, 'framework' => null],
+            'risks' => $tests === 0 ? ['No automated tests: behaviour is undocumented.'] : [],
+            'stages' => [
+                'requirements' => ['status' => $readme ? 'complete' : 'missing', 'evidence' => $readme ? 'README describes the product.' : 'No README.', 'document' => $readme ? "# Requirements (reverse-engineered)\n\n- Derived from the existing README." : ''],
+                'architecture' => ['status' => $docs ? 'complete' : 'missing', 'evidence' => $docs ? 'docs/ describes the design.' : 'No design docs.', 'document' => $docs ? "# Architecture (from docs/)\n\n- Layered design as documented." : ''],
+                'task_breakdown' => ['status' => $tasks ? 'partial' : 'complete', 'tasks' => $tasks],
+                'implementation' => ['status' => $tasks ? 'partial' : 'complete', 'evidence' => $tasks ? 'Gaps listed as tasks.' : 'Feature complete and tested.'],
+                'qa' => ['status' => $tests > 0 ? 'partial' : 'missing', 'evidence' => "{$tests} test file(s)."],
+                'deployment' => ['status' => str_contains($prompt, '.github/workflows/') ? 'complete' : 'missing', 'evidence' => 'CI inventory checked.'],
+            ],
+        ];
     }
 
     private function requirements(): string

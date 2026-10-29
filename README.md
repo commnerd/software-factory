@@ -78,6 +78,30 @@ The factory can run containers and propose changes to itself. Set `FACTORY_ACCES
 5. Project page tabs: Pipeline docs · Tasks (red→green→refactor bars) · Tests (container output) ·
    Agent log (click through to the compiled prompt, response and **agent thoughts**) · Files · Models · Settings.
 
+### Existing repositories — assess first, never rebuild blindly
+
+Give a project a repository URL (and optionally a branch; language can be *Auto-detect*) and the first pipeline
+stage, **Import & Assessment**, runs before anything is generated:
+
+1. **Import** — `git clone` (shallow) into the workspace. Only `https://`, `ssh://`, `git@…` sources are accepted;
+   local paths only under `FACTORY_IMPORT_LOCAL_ROOTS`. For private GitHub repos over HTTPS set `GITHUB_TOKEN`
+   (never stored in `.git/config`). An empty repository is treated as greenfield.
+2. **Inventory** — facts gathered by tooling: stack/framework from manifests, README/docs, test files, CI workflows,
+   TODO count, recent commits; the most useful files are mirrored into the project so agents can read them.
+3. **Baseline** — the repository's own tests are run once, in a container, before anything is touched
+   (`FACTORY_IMPORT_BASELINE=false` to skip).
+4. **Assessment** — the `project-assessor` skill judges each stage `complete | partial | missing` with evidence,
+   recovers requirements/architecture documents it can, and lists **only the remaining gaps** as tasks
+   (`feature` = new behaviour; `characterization` = existing untested behaviour).
+5. **You confirm** — a *Confirm starting point* card shows the findings and a recommended stage; pick another stage
+   to override, or reject with a note to re-assess. Stages before the chosen one are marked satisfied; nothing in
+   them is regenerated.
+
+From there the normal pipeline runs with the existing code as context (requirements/architecture/task prompts are told
+to document and extend what exists). *Characterization* tasks have no red phase — their tests must **pass** against the
+current code, which then protects it during later work. The repository's own CI workflows are never overwritten; only
+missing ones are added. Deployment approval commits locally on the cloned branch; nothing is pushed.
+
 ### Strict TDD, enforced in code (`app/Services/Pipeline/TddEngine.php`)
 
 | Phase | Rule |

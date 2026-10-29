@@ -10,8 +10,10 @@ const note = ref('');
 const newBudget = ref(props.gate.payload?.suggested_new_limit ?? '');
 const expanded = ref(props.gate.type === 'architecture_approval');
 const busy = ref(false);
+const startStage = ref(props.gate.payload?.recommended_stage ?? '');
 
 const accent = {
+    assessment_review: 'border-l-teal-500',
     architecture_approval: 'border-l-sky-500',
     cost_override: 'border-l-orange-500',
     deployment: 'border-l-emerald-500',
@@ -20,6 +22,7 @@ const accent = {
 };
 
 const labels = {
+    assessment_review: ['Confirm & continue from here', 'Re-assess with my note'],
     architecture_approval: ['Approve architecture', 'Reject & regenerate'],
     cost_override: ['Raise limit & continue', 'Keep paused'],
     deployment: ['Kick off deployment', 'Send back'],
@@ -31,7 +34,12 @@ function decide(decision) {
     busy.value = true;
     router.post(
         `/approvals/${props.gate.id}/decide`,
-        { decision, note: note.value || null, new_budget: props.gate.type === 'cost_override' ? newBudget.value || null : null },
+        {
+            decision,
+            note: note.value || null,
+            new_budget: props.gate.type === 'cost_override' ? newBudget.value || null : null,
+            start_stage: props.gate.type === 'assessment_review' ? startStage.value || null : null,
+        },
         { preserveScroll: true, onFinish: () => (busy.value = false) },
     );
 }
@@ -65,6 +73,15 @@ function decide(decision) {
         </template>
 
         <template v-if="gate.status === 'pending'">
+            <div v-if="gate.type === 'assessment_review'" class="mt-4">
+                <label class="label">Resume the pipeline at</label>
+                <select v-model="startStage" class="input max-w-sm">
+                    <option v-for="s in gate.payload.stages" :key="s.value" :value="s.value">
+                        {{ s.label }}{{ s.value === gate.payload.recommended_stage ? ' (recommended)' : '' }}
+                    </option>
+                </select>
+                <p class="mt-1 text-xs text-stone-500">Stages before this one are marked satisfied by the existing repository; nothing in them is rebuilt.</p>
+            </div>
             <div class="mt-4 grid gap-3" :class="gate.type === 'cost_override' ? 'sm:grid-cols-[1fr_160px]' : ''">
                 <div>
                     <label class="label">Note (used as feedback when rejecting)</label>

@@ -25,11 +25,21 @@ class DeploymentPrepStage implements StageHandler
     public function run(Project $project, ProjectStage $record): StageResult
     {
         $workflows = $this->ci->generate($project);
+
+        // An imported repository's own pipelines are authoritative: only add what is missing.
+        $kept = [];
+        if ($project->existing_code) {
+            $root = $this->workspace->path($project);
+            $kept = array_column(array_filter($workflows, fn ($w) => is_file("{$root}/{$w['path']}")), 'path');
+            $workflows = array_values(array_filter($workflows, fn ($w) => ! in_array($w['path'], $kept, true)));
+        }
+
         $written = $this->workspace->write($project, $workflows);
 
         $run = $this->agents->run(FactoryStep::DeploymentPrep, [
             'project' => ProjectContext::basic($project),
             'workflows' => $written,
+            'existing_workflows_kept' => $kept,
             'feedback' => $record->feedback ?? '',
             'repository_url' => $project->repository_url ?? 'not configured',
         ], $project);
@@ -40,7 +50,9 @@ class DeploymentPrepStage implements StageHandler
             GateType::Deployment,
             "Kick off deployment — {$project->name}",
             $project,
-            'Tests are 100% green and GitHub Actions workflows were generated ('.implode(', ', $written).'). Approving commits the workspace and marks the release ready.',
+            'Tests are 100% green. GitHub Actions workflows added: '.($written ? implode(', ', $written) : 'none')
+                .($kept ? '; existing workflows kept untouched: '.implode(', ', $kept) : '')
+                .'. Approving commits the workspace locally and marks the release ready.',
             detail: $run->response,
             payload: ['workflows' => $written],
         );

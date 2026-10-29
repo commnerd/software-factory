@@ -60,6 +60,23 @@ return [
         'max_green_attempts' => (int) env('FACTORY_MAX_GREEN_ATTEMPTS', 4),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Importing existing repositories
+    |--------------------------------------------------------------------------
+    | A project with a repository_url is cloned and assessed before anything is
+    | generated. Local paths are refused unless they sit under one of local_roots
+    | (comma-separated absolute paths); remote URLs must be https/ssh/git.
+    */
+    'import' => [
+        'run_baseline' => (bool) env('FACTORY_IMPORT_BASELINE', true), // run the repo's own tests before touching it
+        'clone_timeout' => (int) env('FACTORY_IMPORT_CLONE_TIMEOUT', 300),
+        'max_artifacts' => (int) env('FACTORY_IMPORT_MAX_FILES', 300),
+        'local_roots' => array_filter(explode(',', (string) env('FACTORY_IMPORT_LOCAL_ROOTS', ''))),
+        // Optional token for private github.com HTTPS clones (never persisted in .git/config).
+        'github_token' => env('GITHUB_TOKEN'),
+    ],
+
     'default_budget_usd' => (float) env('FACTORY_DEFAULT_BUDGET_USD', 25),
     'budget_raise_usd' => (float) env('FACTORY_BUDGET_RAISE_USD', 25),
 

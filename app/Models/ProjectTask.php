@@ -14,6 +14,7 @@ class ProjectTask extends Model
     protected $attributes = [
         'status' => 'pending',
         'tdd_phase' => 'pending',
+        'type' => 'feature',
         'attempts' => 0,
     ];
 

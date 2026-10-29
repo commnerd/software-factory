@@ -39,7 +39,7 @@ class Workspace
             $artifact = ProjectArtifact::firstOrNew(['project_id' => $project->id, 'path' => $relative]);
             $artifact->fill([
                 'project_task_id' => $task?->id ?? $artifact->project_task_id,
-                'kind' => $this->kind($relative, $project),
+                'kind' => $this->classify($relative),
                 'content' => $content,
                 'revision' => $artifact->exists ? $artifact->revision + 1 : 1,
             ])->save();
@@ -119,7 +119,7 @@ class Workspace
         return $path;
     }
 
-    private function kind(string $path, Project $project): string
+    public function classify(string $path): string
     {
         return match (true) {
             str_starts_with($path, '.github/') => 'workflow',

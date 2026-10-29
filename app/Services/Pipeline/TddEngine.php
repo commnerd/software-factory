@@ -35,11 +35,43 @@ class TddEngine
     {
         $this->workspace->initGit($project);
 
+        if ($task->type === 'characterization') {
+            $this->characterize($project, $task);
+            $task->setPhase(TddPhase::Done);
+
+            return;
+        }
+
         $testPaths = $this->red($project, $task);
         $this->green($project, $task, $testPaths);
         $this->refactor($project, $task, $testPaths);
 
         $task->setPhase(TddPhase::Done);
+    }
+
+    /**
+     * Existing, untested behaviour (imported repos): there is nothing to turn red. The tests must
+     * document what the code already does, so they have to PASS against the current implementation;
+     * once they do they protect that behaviour from the refactors and features that follow.
+     */
+    private function characterize(Project $project, ProjectTask $task): void
+    {
+        $task->setPhase(TddPhase::Green);
+        $feedback = '';
+
+        for ($attempt = 1; $attempt <= (int) config('factory.tdd.max_red_attempts'); $attempt++) {
+            $run = $this->agents->run(FactoryStep::TddRed, $this->vars($project, $task) + ['feedback' => $feedback], $project, $task);
+            $this->workspace->write($project, $this->files($run), $task);
+            $suite = $this->tests->run($project, 'characterize', $task);
+
+            if ($this->passes($suite)) {
+                return;
+            }
+
+            $feedback = "These characterization tests FAIL against the existing code. They must describe behaviour the code already has, not behaviour you wish it had. Output:\n".mb_substr((string) $suite->output, -3000);
+        }
+
+        throw new TddStuckException($task, 'Characterization tests do not pass against the existing code — either the behaviour is unclear or it is a real bug that needs a human decision.');
     }
 
     /** @return list<string> paths of the tests written (frozen from here on) */
@@ -143,7 +175,11 @@ class TddEngine
                 'acceptance_criteria' => $task->acceptance_criteria ?? [],
                 'suggested_files' => $task->files ?? [],
             ],
-            'existing_files' => ProjectContext::files($project),
+            'mode' => $task->type === 'characterization' ? 'characterization' : 'feature',
+            'existing_files' => ProjectContext::files($project, hints: [
+                ...($task->files ?? []),
+                ...preg_split('/\W+/', strtolower($task->title), -1, PREG_SPLIT_NO_EMPTY),
+            ]),
             'test_files' => ProjectArtifact::where('project_id', $project->id)->where('project_task_id', $task->id)->where('kind', 'test')->pluck('content', 'path')->all(),
         ];
     }

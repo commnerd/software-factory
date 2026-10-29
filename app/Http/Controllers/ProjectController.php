@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Enums\FactoryStep;
 use App\Enums\SdlcStage;
+use App\Exceptions\FactoryException;
 use App\Models\ModelConfiguration;
+use App\Services\Import\RepositoryImporter;
 use App\Models\ModelRoute;
 use App\Models\Project;
 use App\Services\Ai\ModelRouter;
@@ -42,17 +44,23 @@ class ProjectController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:120'],
-            'brief' => ['required', 'string', 'max:20000'],
-            'language' => ['required', Rule::in(array_keys(config('factory.languages')))],
+            // With a repository the brief is optional: the code itself says what exists.
+            'brief' => ['required_without:repository_url', 'nullable', 'string', 'max:20000'],
+            'language' => ['required', Rule::in([...array_keys(config('factory.languages')), 'auto'])],
             'framework' => ['nullable', 'string', 'max:120'],
-            'repository_url' => ['nullable', 'url', 'max:255'],
+            'repository_url' => ['nullable', 'string', 'max:255', $this->sourceRule()],
+            'repository_branch' => ['nullable', 'string', 'max:120', 'regex:/^[\w.\/\-]+$/'],
             'budget_limit_usd' => ['nullable', 'numeric', 'min:0'],
             'start' => ['boolean'],
         ]);
 
+        if ($data['language'] === 'auto' && blank($data['repository_url'] ?? null)) {
+            return back()->withErrors(['language' => 'Auto-detect needs a repository to look at.'])->withInput();
+        }
+
         $project = Project::create([
             ...collect($data)->except('start')->all(),
-            'description' => str($data['brief'])->limit(200)->toString(),
+            'description' => str($data['brief'] ?? "Existing repository: {$data['repository_url']}")->limit(200)->toString(),
         ]);
 
         if ($data['start'] ?? false) {
@@ -60,6 +68,17 @@ class ProjectController extends Controller
         }
 
         return redirect()->route('projects.show', $project)->with('success', 'Project created.');
+    }
+
+    private function sourceRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail) {
+            try {
+                app(RepositoryImporter::class)->assertSourceAllowed((string) $value);
+            } catch (FactoryException $e) {
+                $fail($e->getMessage());
+            }
+        };
     }
 
     public function show(Project $project, ModelRouter $router): Response
@@ -70,7 +89,7 @@ class ProjectController extends Controller
             'project' => [
                 'id' => $project->id, 'name' => $project->name, 'slug' => $project->slug, 'description' => $project->description,
                 'brief' => $project->brief, 'language' => $project->language, 'framework' => $project->framework,
-                'repository_url' => $project->repository_url, 'status' => $project->status,
+                'repository_url' => $project->repository_url, 'existing_code' => $project->existing_code, 'status' => $project->status,
                 'current_stage' => $project->current_stage->value, 'last_error' => $project->last_error,
                 'budget_limit_usd' => (float) $project->budget_limit_usd, 'spent_usd' => (float) $project->spent_usd,
                 'config' => $project->config ?? [], 'profile' => $project->profile(),
@@ -90,7 +109,7 @@ class ProjectController extends Controller
                 'tasks' => $s->tasks->map(fn ($t) => [
                     'id' => $t->id, 'title' => $t->title, 'description' => $t->description,
                     'acceptance_criteria' => $t->acceptance_criteria ?? [], 'status' => $t->status,
-                    'tdd_phase' => $t->tdd_phase->value, 'attempts' => $t->attempts, 'notes' => $t->notes,
+                    'tdd_phase' => $t->tdd_phase->value, 'type' => $t->type, 'attempts' => $t->attempts, 'notes' => $t->notes,
                 ]),
             ]),
             'testSuites' => $project->testSuites()->with('task:id,title')->latest('id')->limit(40)->get()->map(fn ($t) => [
@@ -139,7 +158,7 @@ class ProjectController extends Controller
     {
         $data = $request->validate([
             'budget_limit_usd' => ['nullable', 'numeric', 'min:0'],
-            'repository_url' => ['nullable', 'url', 'max:255'],
+            'repository_url' => ['nullable', 'string', 'max:255', $this->sourceRule()],
             'config.image' => ['nullable', 'string', 'max:200'],
             'config.install' => ['nullable', 'string', 'max:500'],
             'config.test' => ['nullable', 'string', 'max:500'],

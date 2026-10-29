@@ -9,6 +9,7 @@ use App\Models\Project;
 use App\Services\Execution\Workspace;
 use App\Services\Pipeline\Contracts\StageHandler;
 use App\Services\Pipeline\Stages\ArchitectureStage;
+use App\Services\Pipeline\Stages\AssessmentStage;
 use App\Services\Pipeline\Stages\DeploymentPrepStage;
 use App\Services\Pipeline\Stages\ImplementationStage;
 use App\Services\Pipeline\Stages\QaStage;
@@ -24,6 +25,7 @@ use Throwable;
 class PipelineOrchestrator
 {
     private const HANDLERS = [
+        'assessment' => AssessmentStage::class,
         'requirements' => RequirementsStage::class,
         'architecture' => ArchitectureStage::class,
         'task_breakdown' => TaskBreakdownStage::class,

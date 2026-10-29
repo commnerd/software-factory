@@ -4,6 +4,7 @@ namespace App\Enums;
 
 enum SdlcStage: string
 {
+    case Assessment = 'assessment';
     case Requirements = 'requirements';
     case Architecture = 'architecture';
     case TaskBreakdown = 'task_breakdown';
@@ -14,6 +15,7 @@ enum SdlcStage: string
     public function label(): string
     {
         return match ($this) {
+            self::Assessment => 'Import & Assessment',
             self::Requirements => 'Requirement Analysis',
             self::Architecture => 'Architecture Design',
             self::TaskBreakdown => 'Task Breakdown',
@@ -33,6 +35,6 @@ enum SdlcStage: string
 
     public static function first(): self
     {
-        return self::Requirements;
+        return self::Assessment;
     }
 }

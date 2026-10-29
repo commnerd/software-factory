@@ -20,7 +20,10 @@ const phases = ['red', 'green', 'refactor', 'done'];
             <div class="card divide-y divide-stone-100">
                 <div v-for="t in s.tasks" :key="t.id" class="px-5 py-3">
                     <button class="flex w-full items-center justify-between gap-4 text-left" @click="open = open === t.id ? null : t.id">
-                        <span class="font-medium text-stone-900">{{ t.title }}</span>
+                        <span class="font-medium text-stone-900">
+                            {{ t.title }}
+                            <span v-if="t.type === 'characterization'" class="ml-2 rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-teal-800" title="Documents existing behaviour; tests must pass against current code">existing code</span>
+                        </span>
                         <span class="flex items-center gap-4">
                             <!-- red → green → refactor → done -->
                             <span class="flex items-center gap-1" title="TDD phase">

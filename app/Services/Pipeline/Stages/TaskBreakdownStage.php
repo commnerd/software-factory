@@ -26,6 +26,7 @@ class TaskBreakdownStage implements StageHandler
                 'requirements' => ProjectContext::stageOutput($project, SdlcStage::Requirements),
                 'architecture' => ProjectContext::stageOutput($project, SdlcStage::Architecture),
                 'feedback' => $feedback,
+                'existing_state' => ProjectContext::existingState($project),
             ], $project);
 
             $json = $run->json();
@@ -53,6 +54,7 @@ class TaskBreakdownStage implements StageHandler
                 $project->tasks()->create([
                     'sprint_id' => $sprint->id,
                     'title' => $taskData['title'] ?? 'Untitled task',
+                    'type' => ($taskData['type'] ?? 'feature') === 'characterization' ? 'characterization' : 'feature',
                     'description' => $taskData['description'] ?? null,
                     'acceptance_criteria' => $taskData['acceptance_criteria'] ?? [],
                     'files' => $taskData['files'] ?? [],

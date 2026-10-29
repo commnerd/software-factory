@@ -26,6 +26,7 @@ class ArchitectureStage implements StageHandler
             'project' => ProjectContext::basic($project),
             'requirements' => ProjectContext::stageOutput($project, SdlcStage::Requirements),
             'feedback' => $record->feedback ?? '',
+            'existing_state' => ProjectContext::existingState($project),
         ], $project);
 
         $record->update(['output' => $run->response, 'feedback' => null]);

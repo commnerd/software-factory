@@ -63,15 +63,22 @@ class FactorySeeder extends Seeder
                 'step' => $data['step'],
             ]);
 
-            if (! $skill->current_version_id) {
-                $skill->publish([
-                    'system_prompt' => $data['system_prompt'],
-                    'user_template' => $data['user_template'],
-                    'variables' => $data['variables'],
-                    'output_format' => $data['output_format'],
-                    'change_note' => 'Initial version',
-                    'created_by' => 'seeder',
-                ]);
+            $current = $skill->currentVersion;
+            $payload = [
+                'system_prompt' => $data['system_prompt'],
+                'user_template' => $data['user_template'],
+                'variables' => $data['variables'],
+                'output_format' => $data['output_format'],
+                'created_by' => 'seeder',
+            ];
+
+            if (! $current) {
+                $skill->publish($payload + ['change_note' => 'Initial version']);
+            } elseif ($current->created_by === 'seeder'
+                && ($current->user_template !== $data['user_template'] || $current->system_prompt !== $data['system_prompt'])) {
+                // Library prompts improved and nobody has edited this skill: roll the update forward.
+                // (Skills a human has edited are never touched; their history stays as is.)
+                $skill->publish($payload + ['change_note' => 'Library update']);
             }
         }
     }

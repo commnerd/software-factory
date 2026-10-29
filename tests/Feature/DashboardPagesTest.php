@@ -53,7 +53,7 @@ class DashboardPagesTest extends TestCase
             ->where('gates.0.type', 'architecture_approval')
             ->where('gates.0.status', 'pending')
             ->where('agentRuns.0.has_thoughts', true)
-            ->has('stages', 6));
+            ->has('stages', 7));
     }
 
     public function test_approving_over_http_resumes_the_pipeline(): void

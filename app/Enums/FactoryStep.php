@@ -8,6 +8,7 @@ namespace App\Enums;
  */
 enum FactoryStep: string
 {
+    case ProjectAssessment = 'project_assessment';
     case RequirementsAnalysis = 'requirements_analysis';
     case ArchitectureDesign = 'architecture_design';
     case TaskBreakdown = 'task_breakdown';
@@ -23,6 +24,7 @@ enum FactoryStep: string
     public function label(): string
     {
         return match ($this) {
+            self::ProjectAssessment => 'Existing-code assessment',
             self::RequirementsAnalysis => 'Requirements analysis',
             self::ArchitectureDesign => 'Architecture design',
             self::TaskBreakdown => 'Task breakdown',
@@ -40,6 +42,7 @@ enum FactoryStep: string
     public function stage(): ?SdlcStage
     {
         return match ($this) {
+            self::ProjectAssessment => SdlcStage::Assessment,
             self::RequirementsAnalysis => SdlcStage::Requirements,
             self::ArchitectureDesign => SdlcStage::Architecture,
             self::TaskBreakdown => SdlcStage::TaskBreakdown,
@@ -55,7 +58,7 @@ enum FactoryStep: string
     {
         return match ($this) {
             self::RequirementsAnalysis, self::TaskBreakdown, self::CiWorkflow, self::DeploymentPrep => ModelTier::Cheap,
-            self::TddRefactor, self::QaReview => ModelTier::Standard,
+            self::TddRefactor, self::QaReview, self::ProjectAssessment => ModelTier::Standard,
             self::ArchitectureDesign, self::TddRed, self::TddGreen, self::SelfAnalysis, self::SelfImplementation => ModelTier::Frontier,
         };
     }

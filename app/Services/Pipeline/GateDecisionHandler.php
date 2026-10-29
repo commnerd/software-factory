@@ -14,6 +14,7 @@ class GateDecisionHandler
     public function __construct(
         private readonly PipelineOrchestrator $pipeline,
         private readonly SelfIterationService $self,
+        private readonly AssessmentPlanner $planner,
     ) {}
 
     public function handle(ApprovalGate $gate, bool $approved, array $data = []): void
@@ -21,6 +22,10 @@ class GateDecisionHandler
         $project = $gate->project;
 
         match ($gate->type) {
+            GateType::AssessmentReview => $approved
+                ? $this->confirmAssessment($gate, $data)
+                : $this->pipeline->rerunStage($project, SdlcStage::Assessment, $gate->decision_note),
+
             GateType::ArchitectureApproval => $approved
                 ? $this->pipeline->completeStage($project, SdlcStage::Architecture)
                 : $this->pipeline->rerunStage($project, SdlcStage::Architecture, $gate->decision_note),
@@ -39,6 +44,20 @@ class GateDecisionHandler
 
             GateType::Intervention => $this->intervention($gate, $approved),
         };
+    }
+
+    /** The reviewer accepted (or overrode) the starting point: skip what exists, resume from there. */
+    private function confirmAssessment(ApprovalGate $gate, array $data): void
+    {
+        $project = $gate->project;
+        $override = isset($data['start_stage']) ? SdlcStage::tryFrom($data['start_stage']) : null;
+
+        if ($override === SdlcStage::Assessment) {
+            $override = null;
+        }
+
+        $this->planner->apply($project, $override);
+        $this->pipeline->resume($project);
     }
 
     private function raiseBudgetAndResume(ApprovalGate $gate, array $data): void

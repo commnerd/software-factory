@@ -13,7 +13,7 @@ class Project extends Model
 
     protected $attributes = [
         'status' => 'draft',
-        'current_stage' => 'requirements',
+        'current_stage' => 'assessment',
         'spent_usd' => 0,
     ];
 
@@ -21,6 +21,8 @@ class Project extends Model
     {
         return [
             'config' => 'array',
+            'assessment' => 'array',
+            'existing_code' => 'boolean',
             'current_stage' => SdlcStage::class,
             'budget_limit_usd' => 'decimal:2',
             'spent_usd' => 'decimal:4',

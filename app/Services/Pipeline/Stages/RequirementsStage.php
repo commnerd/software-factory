@@ -19,6 +19,7 @@ class RequirementsStage implements StageHandler
             'project' => ProjectContext::basic($project),
             'brief' => $project->brief ?? $project->description,
             'feedback' => $record->feedback ?? '',
+            'existing_state' => ProjectContext::existingState($project),
         ], $project);
 
         $record->update(['output' => $run->response]);
