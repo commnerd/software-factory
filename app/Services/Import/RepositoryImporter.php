@@ -61,6 +61,27 @@ class RepositoryImporter
         return $inventory;
     }
 
+    /**
+     * Fresh facts about the workspace as it is *now*, for the start of an improvement cycle:
+     * pick up upstream commits when the checked-out branch tracks a remote, then re-inventory.
+     * Works for factory-built projects too (no clone involved).
+     *
+     * @return array<string, mixed>
+     */
+    public function refresh(Project $project): array
+    {
+        $dir = $this->workspace->path($project);
+
+        if (is_dir("{$dir}/.git") && $this->git($dir, ['rev-parse', '--abbrev-ref', '@{u}'])->isSuccessful()) {
+            $this->git($dir, ['pull', '--ff-only', '--quiet']); // best effort: a diverged branch just stays as is
+        }
+
+        $inventory = $this->inventory($dir);
+        $this->mirrorArtifacts($project, $dir);
+
+        return $inventory;
+    }
+
     /** Accept only remote protocols git can fetch, or local paths under explicitly allowed roots. */
     public function assertSourceAllowed(string $source): void
     {
@@ -327,6 +348,13 @@ class RepositoryImporter
         $config = $project->config ?? [];
         if (in_array('build.gradle', $manifests, true) || in_array('build.gradle.kts', $manifests, true)) {
             $config += ['image' => 'gradle:8-jdk21', 'install' => 'true', 'test' => 'gradle test --no-daemon'];
+            $updates['config'] = $config;
+        }
+
+        // Laravel needs an APP_KEY before `artisan test` can boot; the sandbox is a bare container with no Sail.
+        $framework = $updates['framework'] ?? $project->framework;
+        if ($framework === 'Laravel' && blank($config['test'] ?? null)) {
+            $config['test'] = 'cp -n .env.example .env; php artisan key:generate --force --no-interaction && php artisan test';
             $updates['config'] = $config;
         }
 

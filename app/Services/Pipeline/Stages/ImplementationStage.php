@@ -21,7 +21,7 @@ class ImplementationStage implements StageHandler
 
     public function run(Project $project, ProjectStage $record): StageResult
     {
-        $tasks = $project->tasks()->whereNotIn('tdd_phase', [TddPhase::Done->value, TddPhase::Blocked->value])->get();
+        $tasks = $project->cycleTasks()->whereNotIn('tdd_phase', [TddPhase::Done->value, TddPhase::Blocked->value])->get();
 
         foreach ($tasks as $task) {
             try {
@@ -43,8 +43,8 @@ class ImplementationStage implements StageHandler
             }
         }
 
-        $done = $project->tasks()->where('tdd_phase', TddPhase::Done->value)->count();
-        $record->update(['output' => "{$done}/{$project->tasks()->count()} tasks completed through red → green → refactor."]);
+        $done = $project->cycleTasks()->where('tdd_phase', TddPhase::Done->value)->count();
+        $record->update(['output' => "{$done}/{$project->cycleTasks()->count()} tasks completed through red → green → refactor."]);
 
         return StageResult::completed();
     }

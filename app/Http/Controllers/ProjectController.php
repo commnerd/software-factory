@@ -27,8 +27,9 @@ class ProjectController extends Controller
                 'framework' => $p->framework, 'status' => $p->status, 'current_stage' => $p->current_stage->value,
                 'spent_usd' => (float) $p->spent_usd, 'budget_limit_usd' => (float) $p->budget_limit_usd,
                 'updated_at' => $p->updated_at->diffForHumans(),
+                'lifecycle' => $p->lifecycle->value, 'cycle' => $p->cycle,
+                'stages' => $this->stageOptions($p),
             ]),
-            'stages' => $this->stageOptions(),
         ]);
     }
 
@@ -70,6 +71,15 @@ class ProjectController extends Controller
         return redirect()->route('projects.show', $project)->with('success', 'Project created.');
     }
 
+    private function sandboxRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail) {
+            if ($problem = \App\Support\SandboxCommand::problem((string) $value)) {
+                $fail($problem);
+            }
+        };
+    }
+
     private function sourceRule(): \Closure
     {
         return function (string $attribute, mixed $value, \Closure $fail) {
@@ -93,9 +103,23 @@ class ProjectController extends Controller
                 'current_stage' => $project->current_stage->value, 'last_error' => $project->last_error,
                 'budget_limit_usd' => (float) $project->budget_limit_usd, 'spent_usd' => (float) $project->spent_usd,
                 'config' => $project->config ?? [], 'profile' => $project->profile(),
+                'lifecycle' => $project->lifecycle->value, 'lifecycle_label' => $project->lifecycle->label(),
+                'cycle' => $project->cycle, 'cycle_interval_days' => $project->cycle_interval_days,
+                'last_cycle_completed_at' => $project->last_cycle_completed_at?->diffForHumans(),
             ],
-            'stages' => $this->stageOptions()->map(function ($s) use ($project) {
-                $record = $project->stages->first(fn ($r) => $r->stage->value === $s['value']);
+            'proposals' => $project->proposals()->orderByRaw("CASE status WHEN 'in_progress' THEN 0 WHEN 'approved' THEN 1 WHEN 'proposed' THEN 2 WHEN 'deferred' THEN 3 WHEN 'failed' THEN 4 WHEN 'done' THEN 5 ELSE 6 END")
+                ->orderByDesc('score')->get()->map(fn ($p) => [
+                    'id' => $p->id, 'title' => $p->title, 'category' => $p->category, 'summary' => $p->summary,
+                    'rationale' => $p->rationale, 'impact' => $p->impact, 'effort' => $p->effort, 'score' => $p->score,
+                    'status' => $p->status, 'source' => $p->source, 'cycle' => $p->cycle, 'built_in_cycle' => $p->built_in_cycle,
+                    'outcome' => $p->outcome, 'acceptance_criteria' => $p->acceptance_criteria ?? [],
+                ]),
+            'cycles' => $project->stages->where('stage', SdlcStage::Retrospective)->sortByDesc('cycle')->map(fn ($s) => [
+                'cycle' => $s->cycle, 'status' => $s->status, 'retrospective' => $s->output,
+                'shipped' => $project->proposals()->where('built_in_cycle', $s->cycle)->pluck('title'),
+            ])->values(),
+            'stages' => $this->stageOptions($project)->map(function ($s) use ($project) {
+                $record = $project->stages->first(fn ($r) => $r->stage->value === $s['value'] && $r->cycle === $project->cycle);
 
                 return $s + [
                     'status' => $record?->status ?? 'pending',
@@ -105,7 +129,7 @@ class ProjectController extends Controller
                 ];
             })->values(),
             'sprints' => $project->sprints()->with('tasks')->get()->map(fn ($s) => [
-                'id' => $s->id, 'name' => $s->name, 'goal' => $s->goal, 'status' => $s->status,
+                'id' => $s->id, 'name' => $s->name, 'goal' => $s->goal, 'status' => $s->status, 'cycle' => $s->cycle,
                 'tasks' => $s->tasks->map(fn ($t) => [
                     'id' => $t->id, 'title' => $t->title, 'description' => $t->description,
                     'acceptance_criteria' => $t->acceptance_criteria ?? [], 'status' => $t->status,
@@ -142,9 +166,25 @@ class ProjectController extends Controller
             return back()->with('error', 'The pipeline is already active.');
         }
 
+        if ($project->status === 'idle') {
+            return $this->startCycle($project, $pipeline);
+        }
+
         $pipeline->start($project);
 
         return back()->with('success', 'Pipeline queued. Make sure a queue worker is running.');
+    }
+
+    /** Begin the next continuous-improvement cycle (project must be idle). */
+    public function startCycle(Project $project, PipelineOrchestrator $pipeline): RedirectResponse
+    {
+        try {
+            $pipeline->startCycle($project);
+        } catch (FactoryException $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        return back()->with('success', "Improvement cycle {$project->cycle} started: surveying the code for proposals.");
     }
 
     public function pause(Project $project, PipelineOrchestrator $pipeline): RedirectResponse
@@ -159,15 +199,17 @@ class ProjectController extends Controller
         $data = $request->validate([
             'budget_limit_usd' => ['nullable', 'numeric', 'min:0'],
             'repository_url' => ['nullable', 'string', 'max:255', $this->sourceRule()],
+            'cycle_interval_days' => ['nullable', 'integer', 'min:0', 'max:365'],
             'config.image' => ['nullable', 'string', 'max:200'],
-            'config.install' => ['nullable', 'string', 'max:500'],
-            'config.test' => ['nullable', 'string', 'max:500'],
+            'config.install' => ['nullable', 'string', 'max:500', $this->sandboxRule()],
+            'config.test' => ['nullable', 'string', 'max:500', $this->sandboxRule()],
             'config.test_dir' => ['nullable', 'string', 'max:200'],
         ]);
 
         $project->update([
             'budget_limit_usd' => $data['budget_limit_usd'] ?? null,
             'repository_url' => $data['repository_url'] ?? null,
+            'cycle_interval_days' => ($data['cycle_interval_days'] ?? 0) ?: null,
             'config' => array_filter($data['config'] ?? [], fn ($v) => filled($v)),
         ]);
 
@@ -191,9 +233,10 @@ class ProjectController extends Controller
         return redirect()->route('projects.index')->with('success', 'Project deleted.');
     }
 
-    private function stageOptions()
+    /** The stages of the project's current lifecycle (a new build, or an improvement cycle). */
+    private function stageOptions(Project $project)
     {
-        return collect(SdlcStage::cases())->map(fn ($s) => ['value' => $s->value, 'label' => $s->label()]);
+        return collect($project->sequence())->map(fn ($s) => ['value' => $s->value, 'label' => $s->label($project->lifecycle)]);
     }
 
     private function modelOptions()

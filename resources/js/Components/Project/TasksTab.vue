@@ -14,7 +14,7 @@ const phases = ['red', 'green', 'refactor', 'done'];
     <div class="space-y-6">
         <section v-for="s in sprints" :key="s.id">
             <div class="mb-2 flex items-baseline gap-3">
-                <h3 class="font-semibold">{{ s.name }}</h3>
+                <h3 class="font-semibold">{{ s.name }}<span v-if="s.cycle" class="ml-2 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-stone-500">cycle {{ s.cycle }}</span></h3>
                 <span class="text-sm text-stone-500">{{ s.goal }}</span>
             </div>
             <div class="card divide-y divide-stone-100">

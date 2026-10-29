@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import StatusBadge from './StatusBadge.vue';
 
@@ -10,10 +10,28 @@ const note = ref('');
 const newBudget = ref(props.gate.payload?.suggested_new_limit ?? '');
 const expanded = ref(props.gate.type === 'architecture_approval');
 const busy = ref(false);
-const startStage = ref(props.gate.payload?.recommended_stage ?? '');
+
+// backlog selection
+const isBacklog = props.gate.type === 'backlog_selection';
+const proposals = props.gate.payload?.proposals ?? [];
+const selected = ref(new Set(props.gate.payload?.recommended_ids ?? []));
+const open = ref(null);
+const toggle = (id) => {
+    const s = new Set(selected.value);
+    s.has(id) ? s.delete(id) : s.add(id);
+    selected.value = s;
+};
+const selectedCount = computed(() => selected.value.size);
+
+const categoryStyle = {
+    feature: 'bg-violet-100 text-violet-800', enhancement: 'bg-sky-100 text-sky-800', bugfix: 'bg-red-100 text-red-800',
+    tests: 'bg-teal-100 text-teal-800', refactor: 'bg-stone-200 text-stone-700', performance: 'bg-amber-100 text-amber-800',
+    security: 'bg-rose-100 text-rose-800', docs: 'bg-lime-100 text-lime-800', devex: 'bg-indigo-100 text-indigo-800', dependency: 'bg-orange-100 text-orange-800',
+};
 
 const accent = {
     assessment_review: 'border-l-teal-500',
+    backlog_selection: 'border-l-fuchsia-500',
     architecture_approval: 'border-l-sky-500',
     cost_override: 'border-l-orange-500',
     deployment: 'border-l-emerald-500',
@@ -22,13 +40,16 @@ const accent = {
 };
 
 const labels = {
-    assessment_review: ['Confirm & continue from here', 'Re-assess with my note'],
+    assessment_review: ['Confirm & start improving', 'Re-assess with my note'],
+    backlog_selection: ['Build selected', 'Re-survey with my note'],
     architecture_approval: ['Approve architecture', 'Reject & regenerate'],
     cost_override: ['Raise limit & continue', 'Keep paused'],
     deployment: ['Kick off deployment', 'Send back'],
     self_modification: ['Stage this change', 'Reject'],
     intervention: ['Retry / send back', 'Skip / pause'],
 };
+
+const approveLabel = computed(() => (isBacklog ? (selectedCount.value ? `Build ${selectedCount.value} selected` : 'Build nothing — close the cycle') : labels[props.gate.type][0]));
 
 function decide(decision) {
     busy.value = true;
@@ -38,7 +59,7 @@ function decide(decision) {
             decision,
             note: note.value || null,
             new_budget: props.gate.type === 'cost_override' ? newBudget.value || null : null,
-            start_stage: props.gate.type === 'assessment_review' ? startStage.value || null : null,
+            selected_ids: isBacklog ? [...selected.value] : null,
         },
         { preserveScroll: true, onFinish: () => (busy.value = false) },
     );
@@ -67,24 +88,42 @@ function decide(decision) {
             <div><span class="text-stone-500">Limit</span> <b>${{ Number(gate.payload.limit).toFixed(2) }}</b></div>
         </div>
 
+        <!-- backlog: tick what this cycle builds -->
+        <ul v-if="isBacklog && gate.status === 'pending'" class="mt-4 divide-y divide-stone-100 rounded-md border border-stone-200">
+            <li v-for="p in proposals" :key="p.id" class="px-4 py-3" :class="selected.has(p.id) ? 'bg-fuchsia-50/50' : ''">
+                <div class="flex items-start gap-3">
+                    <input type="checkbox" class="mt-1 h-4 w-4 accent-fuchsia-600" :checked="selected.has(p.id)" @change="toggle(p.id)" />
+                    <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-medium text-stone-900">{{ p.title }}</span>
+                            <span class="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase" :class="categoryStyle[p.category] ?? 'bg-stone-200'">{{ p.category }}</span>
+                            <span v-if="p.source !== 'survey'" class="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] uppercase text-stone-500">{{ p.source }}</span>
+                            <span v-if="p.status === 'deferred'" class="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] uppercase text-stone-500">carried over</span>
+                        </div>
+                        <p class="mt-0.5 text-sm text-stone-600">{{ p.summary }}</p>
+                        <button class="mt-1 text-xs font-medium text-amber-700 hover:underline" @click="open = open === p.id ? null : p.id">{{ open === p.id ? 'Hide' : 'Why & acceptance criteria' }}</button>
+                        <div v-if="open === p.id" class="mt-2 text-sm text-stone-700">
+                            <p v-if="p.rationale">{{ p.rationale }}</p>
+                            <ul v-if="p.acceptance_criteria.length" class="mt-1 list-inside list-disc text-stone-600"><li v-for="c in p.acceptance_criteria" :key="c">{{ c }}</li></ul>
+                        </div>
+                    </div>
+                    <div class="shrink-0 text-right text-xs text-stone-500">
+                        <div title="value for effort"><b class="text-sm text-stone-800">{{ p.score.toFixed(1) }}</b> score</div>
+                        <div>impact {{ p.impact }} · effort {{ p.effort }}</div>
+                    </div>
+                </div>
+            </li>
+        </ul>
+
         <template v-if="gate.detail">
             <button class="mt-3 text-xs font-medium text-amber-700 hover:underline" @click="expanded = !expanded">{{ expanded ? 'Hide' : 'Show' }} details</button>
             <pre v-if="expanded" class="code mt-2 max-h-96 whitespace-pre-wrap">{{ gate.detail }}</pre>
         </template>
 
         <template v-if="gate.status === 'pending'">
-            <div v-if="gate.type === 'assessment_review'" class="mt-4">
-                <label class="label">Resume the pipeline at</label>
-                <select v-model="startStage" class="input max-w-sm">
-                    <option v-for="s in gate.payload.stages" :key="s.value" :value="s.value">
-                        {{ s.label }}{{ s.value === gate.payload.recommended_stage ? ' (recommended)' : '' }}
-                    </option>
-                </select>
-                <p class="mt-1 text-xs text-stone-500">Stages before this one are marked satisfied by the existing repository; nothing in them is rebuilt.</p>
-            </div>
             <div class="mt-4 grid gap-3" :class="gate.type === 'cost_override' ? 'sm:grid-cols-[1fr_160px]' : ''">
                 <div>
-                    <label class="label">Note (used as feedback when rejecting)</label>
+                    <label class="label">{{ isBacklog ? 'Note (focus for a re-survey, or context for what you chose)' : 'Note (used as feedback when rejecting)' }}</label>
                     <input v-model="note" class="input" placeholder="Optional" />
                 </div>
                 <div v-if="gate.type === 'cost_override'">
@@ -93,7 +132,7 @@ function decide(decision) {
                 </div>
             </div>
             <div class="mt-3 flex gap-2">
-                <button class="btn-success" :disabled="busy" @click="decide('approve')">{{ labels[gate.type][0] }}</button>
+                <button class="btn-success" :disabled="busy" @click="decide('approve')">{{ approveLabel }}</button>
                 <button class="btn-secondary" :disabled="busy" @click="decide('reject')">{{ labels[gate.type][1] }}</button>
             </div>
         </template>

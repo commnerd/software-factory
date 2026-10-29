@@ -63,20 +63,13 @@ class AssessmentStage implements StageHandler
         $summary = $this->planner->summaryMarkdown($plan, $inventory);
         $record->update(['output' => $summary, 'feedback' => null]);
 
-        $recommended = $this->planner->startStage($plan);
-
         $this->gates->open(
             GateType::AssessmentReview,
-            "Confirm starting point — {$project->name}",
+            "Confirm assessment — {$project->name}",
             $project,
-            "The repository already contains work. Recommended: resume at \"{$recommended->label()}\". Pick a different stage to override, or reject with a note to re-assess.",
+            'The repository already contains work, so it will not be rebuilt. Confirming starts continuous improvement: the gaps found here seed the backlog and the factory surveys the code for more. Reject with a note to re-assess.',
             detail: $summary,
-            payload: [
-                'recommended_stage' => $recommended->value,
-                'stages' => collect(SdlcStage::cases())->reject(fn ($s) => $s === SdlcStage::Assessment)
-                    ->map(fn ($s) => ['value' => $s->value, 'label' => $s->label()])->values()->all(),
-                'agent_run_id' => $run->id,
-            ],
+            payload: ['agent_run_id' => $run->id],
         );
 
         return StageResult::awaitingApproval();

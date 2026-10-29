@@ -18,7 +18,9 @@ class FakeProvider implements AiProvider
             'project_assessment' => json_encode($this->assessment($request->prompt), JSON_PRETTY_PRINT),
             'requirements_analysis' => $this->requirements(),
             'architecture_design' => $this->architecture(),
-            'task_breakdown' => json_encode($this->breakdown(), JSON_PRETTY_PRINT),
+            'feature_survey' => json_encode($this->survey($request->prompt), JSON_PRETTY_PRINT),
+            'cycle_retrospective' => "## Shipped\n- [fake] See the metrics above.\n\n## Lessons\n- Small, test-first slices shipped cleanly.\n\n## Next survey focus\n- Look at areas touched this cycle for follow-ups.",
+            'task_breakdown' => json_encode($this->breakdown($request->prompt), JSON_PRETTY_PRINT),
             'tdd_red' => json_encode(['files' => [['path' => 'tests/GreetingTest.txt', 'content' => 'failing test placeholder']], 'notes' => 'Wrote failing tests first.']),
             'tdd_green' => json_encode(['files' => [['path' => 'src/greeting.txt', 'content' => 'implementation placeholder']], 'notes' => 'Minimal implementation.']),
             'tdd_refactor' => json_encode(['files' => [['path' => 'src/greeting.txt', 'content' => 'refactored placeholder']], 'notes' => 'Extracted helper, behaviour unchanged.']),
@@ -106,8 +108,35 @@ class FakeProvider implements AiProvider
         MD;
     }
 
-    private function breakdown(): array
+    /** Three candidate improvements whose titles carry the cycle, so each survey is distinguishable. */
+    private function survey(string $prompt): array
     {
+        $cycle = preg_match('/Improvement cycle: (\d+)/', $prompt, $m) ? (int) $m[1] : 1;
+
+        return [
+            'observations' => "[fake] Cycle {$cycle}: reviewed layout, tests and history.",
+            'proposals' => [
+                ['title' => "Add export endpoint (cycle {$cycle})", 'category' => 'feature', 'summary' => 'Let users export their data.', 'rationale' => 'Frequently needed; no export path exists.', 'evidence' => ['src/'], 'impact' => 5, 'effort' => 2, 'acceptance_criteria' => ['Export returns all records'], 'files' => ['src/export.txt']],
+                ['title' => "Cover core module with tests (cycle {$cycle})", 'category' => 'tests', 'summary' => 'Pin down current behaviour.', 'rationale' => 'Low coverage on core.', 'evidence' => ['tests/'], 'impact' => 4, 'effort' => 2, 'acceptance_criteria' => ['Tests pass on current code'], 'files' => ['tests/core.txt']],
+                ['title' => "Tidy configuration loading (cycle {$cycle})", 'category' => 'refactor', 'summary' => 'Remove duplication.', 'rationale' => 'Three copies of the same parsing.', 'evidence' => [], 'impact' => 2, 'effort' => 3, 'acceptance_criteria' => ['Behaviour unchanged'], 'files' => []],
+            ],
+        ];
+    }
+
+    private function breakdown(string $prompt = ''): array
+    {
+        // Cycle planning: one task per selected proposal (the prompt lists them as id/title/category).
+        if (preg_match_all('/"id": (\d+),\s*"title": "([^"]+)",\s*"category": "(\w+)"/', $prompt, $m, PREG_SET_ORDER)) {
+            return ['sprints' => [[
+                'name' => 'Cycle plan',
+                'goal' => 'Build the approved proposals.',
+                'tasks' => array_map(fn ($p) => [
+                    'proposal_id' => (int) $p[1], 'title' => $p[2], 'type' => $p[3] === 'tests' ? 'characterization' : 'feature',
+                    'description' => "Deliver: {$p[2]}", 'acceptance_criteria' => ['Acceptance criteria met'], 'files' => [],
+                ], $m),
+            ]]];
+        }
+
         return ['sprints' => [[
             'name' => 'Sprint 1 — Foundations',
             'goal' => 'Deliver the walking skeleton.',

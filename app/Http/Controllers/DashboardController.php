@@ -21,9 +21,10 @@ class DashboardController extends Controller
                 'spend' => (float) AgentRun::where('is_test', false)->sum('cost_usd'),
                 'runs' => AgentRun::where('is_test', false)->count(),
             ],
-            'stages' => collect(SdlcStage::cases())->map(fn ($s) => ['value' => $s->value, 'label' => $s->label()]),
             'projects' => Project::latest()->limit(8)->get()->map(fn (Project $p) => [
                 'id' => $p->id, 'name' => $p->name, 'status' => $p->status, 'language' => $p->language,
+                'lifecycle' => $p->lifecycle->value, 'cycle' => $p->cycle,
+                'stages' => collect($p->sequence())->map(fn ($s) => ['value' => $s->value, 'label' => $s->label($p->lifecycle)]),
                 'current_stage' => $p->current_stage->value, 'spent_usd' => (float) $p->spent_usd,
             ]),
             'gates' => ApprovalGate::with('project:id,name')->where('status', 'pending')->latest()->limit(5)->get()

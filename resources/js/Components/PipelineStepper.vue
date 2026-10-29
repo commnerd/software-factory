@@ -14,6 +14,7 @@ function state(stage, index) {
     if (stage.status) {
         return stage.status;
     }
+    if (props.projectStatus === 'idle') return 'completed'; // released; waiting for the next cycle
     const currentIndex = props.stages.findIndex((s) => s.value === props.current);
     if (index < currentIndex) return 'completed';
     if (index === currentIndex) return props.projectStatus === 'completed' ? 'completed' : 'running';

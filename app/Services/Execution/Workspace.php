@@ -91,7 +91,7 @@ class Workspace
     }
 
     /** Commit everything in the workspace locally (used by the deployment kick). */
-    public function commit(Project $project, string $message): bool
+    public function commit(Project $project, string $message, ?string $branch = null): bool
     {
         $root = $this->path($project);
         $this->initGit($project);
@@ -100,6 +100,11 @@ class Workspace
             'GIT_AUTHOR_NAME' => 'Software Factory', 'GIT_AUTHOR_EMAIL' => 'factory@localhost',
             'GIT_COMMITTER_NAME' => 'Software Factory', 'GIT_COMMITTER_EMAIL' => 'factory@localhost',
         ];
+
+        if ($branch) {
+            // Carries the working-tree changes onto the cycle branch; the previous branch is left as it was.
+            (new Process(['git', 'checkout', '-q', '-B', $branch], $root, $env))->run();
+        }
 
         (new Process(['git', 'add', '-A'], $root, $env))->run();
         $commit = new Process(['git', 'commit', '-q', '-m', $message], $root, $env);

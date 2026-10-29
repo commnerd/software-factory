@@ -6,6 +6,7 @@ const props = defineProps({ project: Object });
 const form = useForm({
     budget_limit_usd: props.project.budget_limit_usd,
     repository_url: props.project.repository_url ?? '',
+    cycle_interval_days: props.project.cycle_interval_days ?? '',
     config: {
         image: props.project.config.image ?? '',
         install: props.project.config.install ?? '',
@@ -29,6 +30,12 @@ const save = () => form.put(`/projects/${props.project.id}/settings`, { preserve
                 <input v-model="form.repository_url" class="input" />
                 <p v-if="form.errors.repository_url" class="mt-1 text-xs text-red-600">{{ form.errors.repository_url }}</p>
             </div>
+        </div>
+
+        <div>
+            <label class="label">Auto-start an improvement cycle every N days (when idle)</label>
+            <input v-model="form.cycle_interval_days" type="number" min="0" max="365" class="input max-w-xs" placeholder="off — start cycles manually" />
+            <p class="mt-1 text-xs text-stone-500">A scheduled cycle only runs the survey; nothing is built until you choose proposals at the Backlog Review.</p>
         </div>
 
         <div>

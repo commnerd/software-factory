@@ -17,8 +17,19 @@ final class StageResult
         return new self('awaiting_approval');
     }
 
+    /** The stage ended the whole run itself (e.g. an empty backlog closed the cycle); nothing more to do now. */
+    public static function skipped(): self
+    {
+        return new self('skipped');
+    }
+
     public function isCompleted(): bool
     {
         return $this->state === 'completed';
+    }
+
+    public function isSkipped(): bool
+    {
+        return $this->state === 'skipped';
     }
 }

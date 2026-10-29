@@ -2,7 +2,9 @@
 
 namespace App\Services\Execution;
 
+use App\Exceptions\FactoryException;
 use App\Models\Project;
+use App\Support\SandboxCommand;
 use App\Models\ProjectTask;
 use App\Models\TestSuite;
 use App\Services\Execution\Contracts\Executor;
@@ -22,7 +24,15 @@ class TestRunner
     public function run(Project $project, string $phase, ?ProjectTask $task = null): TestSuite
     {
         $profile = $project->profile();
-        $command = "({$profile['install']}) && ({$profile['test']})";
+
+        // Fail fast and clearly rather than letting `sail`/`docker` blow up inside a container with no Docker.
+        foreach (['install', 'test'] as $key) {
+            if ($problem = SandboxCommand::problem($profile[$key] ?? null)) {
+                throw new FactoryException("Project setting \"{$key}\" is not runnable: {$problem} Fix it under Project → Settings → Container execution overrides.");
+            }
+        }
+
+        $command ="({$profile['install']}) && ({$profile['test']})";
 
         $result = $this->executor->run(new ExecutionRequest(
             workspace: $this->workspace->path($project),

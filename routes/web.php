@@ -4,6 +4,7 @@ use App\Http\Controllers\AgentRunController;
 use App\Http\Controllers\AiSkillController;
 use App\Http\Controllers\ApprovalGateController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ImprovementProposalController;
 use App\Http\Controllers\ModelConfigurationController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\SelfIterationController;
@@ -15,11 +16,15 @@ Route::resource('projects', ProjectController::class)->only(['index', 'create', 
 Route::controller(ProjectController::class)->prefix('projects/{project}')->name('projects.')->group(function () {
     Route::post('start', 'start')->name('start');
     Route::post('pause', 'pause')->name('pause');
+    Route::post('cycle', 'startCycle')->name('cycle');
     Route::put('settings', 'settings')->name('settings');
     Route::put('routes', 'routes')->name('routes');
 });
 
-Route::get('models', [ModelConfigurationController::class, 'index'])->name('models.index');
+Route::post('projects/{project}/ideas', [ImprovementProposalController::class, 'store'])->name('ideas.store');
+Route::patch('proposals/{proposal}', [ImprovementProposalController::class, 'update'])->name('proposals.update');
+
+Route::get('models',[ModelConfigurationController::class, 'index'])->name('models.index');
 Route::post('models', [ModelConfigurationController::class, 'store'])->name('models.store');
 Route::put('models/routing', [ModelConfigurationController::class, 'routing'])->name('models.routing');
 Route::put('models/{model}', [ModelConfigurationController::class, 'update'])->name('models.update');

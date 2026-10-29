@@ -4,6 +4,7 @@ namespace App\Services\Pipeline\Stages;
 
 use App\Enums\FactoryStep;
 use App\Enums\GateType;
+use App\Enums\Lifecycle;
 use App\Models\Project;
 use App\Models\ProjectStage;
 use App\Services\Ai\AgentRunner;
@@ -28,7 +29,7 @@ class DeploymentPrepStage implements StageHandler
 
         // An imported repository's own pipelines are authoritative: only add what is missing.
         $kept = [];
-        if ($project->existing_code) {
+        if ($project->existing_code || $project->lifecycle === Lifecycle::Improve) {
             $root = $this->workspace->path($project);
             $kept = array_column(array_filter($workflows, fn ($w) => is_file("{$root}/{$w['path']}")), 'path');
             $workflows = array_values(array_filter($workflows, fn ($w) => ! in_array($w['path'], $kept, true)));
@@ -52,7 +53,9 @@ class DeploymentPrepStage implements StageHandler
             $project,
             'Tests are 100% green. GitHub Actions workflows added: '.($written ? implode(', ', $written) : 'none')
                 .($kept ? '; existing workflows kept untouched: '.implode(', ', $kept) : '')
-                .'. Approving commits the workspace locally and marks the release ready.',
+                .($project->lifecycle === Lifecycle::Improve
+                    ? ". Approving commits cycle {$project->cycle} to the local branch factory/cycle-{$project->cycle} (pushing or opening a PR is yours to do)."
+                    : '. Approving commits the workspace locally and marks the release ready.'),
             detail: $run->response,
             payload: ['workflows' => $written],
         );

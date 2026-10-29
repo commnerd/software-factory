@@ -56,7 +56,7 @@ const submit = (start) => form.transform((d) => ({ ...d, start })).post('/projec
                 <label class="label">Existing repository (optional)</label>
                 <input v-model="form.repository_url" class="input" placeholder="https://github.com/org/repo" />
                 <p v-if="form.errors.repository_url" class="mt-1 text-xs text-red-600">{{ form.errors.repository_url }}</p>
-                <p v-else class="mt-1 text-xs text-stone-500">If it already has code, the factory imports and assesses it first, then asks where to resume — it won’t rebuild what exists.</p>
+                <p v-else class="mt-1 text-xs text-stone-500">If it already has code, the factory imports and assesses it, then runs continuous-improvement cycles on it (survey → you choose → build) — it never rebuilds what exists.</p>
             </div>
             <div v-if="form.repository_url">
                 <label class="label">Branch (optional)</label>

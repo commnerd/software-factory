@@ -4,37 +4,71 @@ namespace App\Enums;
 
 enum SdlcStage: string
 {
+    // shared
     case Assessment = 'assessment';
-    case Requirements = 'requirements';
-    case Architecture = 'architecture';
     case TaskBreakdown = 'task_breakdown';
     case TddImplementation = 'tdd_implementation';
     case Qa = 'qa';
     case DeploymentPrep = 'deployment_prep';
 
-    public function label(): string
+    // build lifecycle only
+    case Requirements = 'requirements';
+    case Architecture = 'architecture';
+
+    // improve lifecycle only
+    case Survey = 'survey';
+    case Backlog = 'backlog';
+    case Retrospective = 'retrospective';
+
+    /** @return list<self> ordered stages of a lifecycle */
+    public static function sequence(Lifecycle $lifecycle): array
     {
+        return match ($lifecycle) {
+            Lifecycle::Build => [
+                self::Assessment, self::Requirements, self::Architecture, self::TaskBreakdown,
+                self::TddImplementation, self::Qa, self::DeploymentPrep,
+            ],
+            Lifecycle::Improve => [
+                self::Survey, self::Backlog, self::TaskBreakdown,
+                self::TddImplementation, self::Qa, self::DeploymentPrep, self::Retrospective,
+            ],
+        };
+    }
+
+    public static function first(Lifecycle $lifecycle): self
+    {
+        return self::sequence($lifecycle)[0];
+    }
+
+    public function next(Lifecycle $lifecycle): ?self
+    {
+        $seq = self::sequence($lifecycle);
+        $i = array_search($this, $seq, true);
+
+        return $i === false ? null : ($seq[$i + 1] ?? null);
+    }
+
+    public function label(?Lifecycle $lifecycle = null): string
+    {
+        $improve = $lifecycle === Lifecycle::Improve;
+
         return match ($this) {
             self::Assessment => 'Import & Assessment',
             self::Requirements => 'Requirement Analysis',
             self::Architecture => 'Architecture Design',
-            self::TaskBreakdown => 'Task Breakdown',
+            self::TaskBreakdown => $improve ? 'Cycle Planning' : 'Task Breakdown',
             self::TddImplementation => 'TDD Implementation',
             self::Qa => 'QA / Testing',
-            self::DeploymentPrep => 'Deployment Prep',
+            self::DeploymentPrep => $improve ? 'Release Prep' : 'Deployment Prep',
+            self::Survey => 'Survey & Propose',
+            self::Backlog => 'Backlog Review',
+            self::Retrospective => 'Retrospective',
         };
     }
 
-    public function next(): ?self
+    /** @return list<array{value: string, label: string}> */
+    public static function options(Lifecycle $lifecycle): array
     {
-        $cases = self::cases();
-        $i = array_search($this, $cases, true);
-
-        return $cases[$i + 1] ?? null;
-    }
-
-    public static function first(): self
-    {
-        return self::Assessment;
+        return array_map(fn (self $s) => ['value' => $s->value, 'label' => $s->label($lifecycle)], self::sequence($lifecycle));
     }
 }

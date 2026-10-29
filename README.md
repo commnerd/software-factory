@@ -1,9 +1,11 @@
 # Software Factory
 
-An autonomous, AI-driven control panel that runs a project through the whole SDLC —
-**Requirements → Architecture → Task breakdown → TDD implementation → QA → Deployment prep** —
-for any language/framework, with every test run isolated in a throw-away container and every
-critical choice paused behind a human decision card.
+An autonomous, AI-driven control panel for the whole software lifecycle, for any language/framework.
+A **new** project is built once (**Requirements → Architecture → Task breakdown → TDD → QA → Deployment prep**);
+after that — and from the start for any **existing** repository — it runs **continuous-improvement cycles**
+(**Survey → Backlog review → Plan → TDD → QA → Release → Retrospective**) in which the factory proposes
+features and fixes from what it finds in the code and you choose what gets built. Every test run is isolated in a
+throw-away container and every critical choice pauses behind a human decision card.
 
 Stack: Laravel 13 · Inertia v3 + Vue 3 · Tailwind 4 · MySQL 8.4 · Laravel Sail (Docker).
 
@@ -37,6 +39,7 @@ Open <http://localhost:8080> (`APP_PORT` in `.env`).
 |--------------|---------|
 | `laravel.test` | Web app (Vite assets, Inertia pages) |
 | `queue`      | `queue:work` — runs `AdvancePipelineJob` and self-iteration jobs. **Pipelines only move while this is up.** |
+| `scheduler`  | `schedule:work` — hourly `factory:cycle-due` starts improvement cycles for projects that opted into an interval. |
 | `mysql`      | Application database |
 | host Docker socket | Mounted into both PHP services so the factory can start sibling containers for installs/tests. `FACTORY_HOST_PROJECT_PATH` (set to `${PWD}` by compose) lets it translate paths for `docker run -v`. |
 
@@ -67,21 +70,66 @@ The factory can run containers and propose changes to itself. Set `FACTORY_ACCES
 
 ## 2. Using it
 
+### Two lifecycles
+
+A project is **built once, then improved continuously**. The factory picks the lifecycle from what the project is:
+
+```
+ NEW (no code yet)                               EXISTING repository (code already there)
+ ─────────────────                               ────────────────────────────────────────
+ BUILD lifecycle                                 Import & Assessment ──(you confirm)──┐
+ Requirements → Architecture ⟶ you approve       (gaps become the first backlog)      │
+ Task breakdown → TDD → QA                                                            │
+ Deployment prep ⟶ you approve                                                        │
+        │                                                                             │
+        └──────────── project idles, "released" ──────────────────────────────────────┤
+                                                                                      ▼
+                       IMPROVE lifecycle — numbered cycles, forever
+        ┌─► Survey & Propose ─► Backlog Review ⟶ you choose ─► Cycle Planning ─► TDD ─► QA ─►
+        │   (AI reads the code,   (tick what this cycle                                      │
+        │    proposes features,    builds; rest stays                  Release Prep ⟶ you approve
+        │    fixes, tests, …)      in the backlog)                                           │
+        │                                                                          Retrospective
+        └──────────── project idles; next cycle starts by button or schedule ◄───────────────┘
+```
+
 1. **Projects → New project** — brief, language/stack, optional repo + budget. *Create & start* queues the pipeline.
-2. The pipeline writes requirements, designs the architecture, and **stops at an Architecture approval card**.
-   Reject with a note and it regenerates using your feedback.
-3. After approval: task breakdown (sprints + tasks) → **TDD per task** → full-suite **QA** →
-   generated **GitHub Actions** workflows → **Deployment approval card**. Approving commits the workspace
-   locally (`storage/app/workspaces/<slug>`).
-4. **Approvals** shows every pending decision (architecture, cost override, deployment, self-modification,
-   stuck task / failed QA). The sidebar badge counts them.
-5. Project page tabs: Pipeline docs · Tasks (red→green→refactor bars) · Tests (container output) ·
-   Agent log (click through to the compiled prompt, response and **agent thoughts**) · Files · Models · Settings.
+2. **New project:** the pipeline writes requirements, designs the architecture, and **stops at an Architecture approval card**.
+   Rejecting regenerates it with your note as feedback. After approval: task breakdown → **TDD per task** → full-suite **QA** →
+   generated **GitHub Actions** workflows → **Deployment approval card**. Approving commits locally; the project then **idles as
+   "released"** and the **Start improvement cycle 1** button appears.
+3. **Existing repository:** see the next section; after you confirm the assessment it goes straight into cycle 1.
+4. **Approvals** shows every pending decision (assessment, backlog selection, architecture, cost override, deployment,
+   self-modification, stuck task / failed QA). The sidebar badge counts them.
+5. Project page tabs: Pipeline docs · **Backlog** (proposals, cycle history, add your own idea) · Tasks (red→green→refactor bars) ·
+   Tests (container output) · Agent log (compiled prompt, response, **agent thoughts**) · Files · Models · Settings.
 
-### Existing repositories — assess first, never rebuild blindly
+### Continuous improvement cycles
 
-Give a project a repository URL (and optionally a branch; language can be *Auto-detect*) and the first pipeline
-stage, **Import & Assessment**, runs before anything is generated:
+Each cycle is one pass of the improve lifecycle, numbered 1, 2, 3 …:
+
+| Stage | What happens | Human? |
+|-------|--------------|--------|
+| **Survey & Propose** | Pulls upstream commits if the branch tracks a remote, re-inventories the code, runs the tests (health check), and asks the `feature-surveyor` skill for new features, enhancements, bug fixes, missing tests, refactors, performance/security work, docs, dev-experience and dependency upgrades — each with evidence, impact (1–5), effort (1–5), acceptance criteria. It sees the open backlog, everything built/rejected/failed before (so it never repeats itself) and the last retrospectives. | — |
+| **Backlog Review** | A decision card lists every open proposal (new + carried over) ranked by value-for-effort (`impact×2 ÷ effort`) with the top *N* pre-ticked (`FACTORY_CYCLE_CAPACITY`, default 3). Tick what to build. Unticked items stay as *deferred*. Choosing nothing closes the cycle. Reject + note = "re-survey with this focus". | **yes** |
+| **Cycle Planning** | Splits only the chosen proposals into small tasks (one sprint per cycle), each linked to its proposal. | — |
+| **TDD Implementation** | Same strict red → green → refactor engine (see below); `tests` proposals use characterization mode. | on stuck |
+| **QA** | Full suite in a clean container + AI review; anything but 100 % green stops for a decision. | on failure |
+| **Release Prep** | Adds only the CI workflows that are missing (existing ones are never overwritten). Approving commits the cycle to the local branch **`factory/cycle-N`** — cumulative, main line untouched, never pushed. | **yes** |
+| **Retrospective** | Marks proposals *done* / *failed* (blocked tasks ⇒ failed), records shipped/not-shipped/blocked/cost/rejections, and writes lessons + "next survey focus" that the next survey reads. | — |
+
+The project then goes **idle**. Start the next cycle with the **Start improvement cycle N** button, or opt in to a schedule in
+*Settings → Auto-start every N days* (the `scheduler` service runs `factory:cycle-due` hourly). A scheduled cycle only
+**surveys**; it then waits at the Backlog Review — nothing is built without a human choosing it.
+
+The **Backlog** tab is yours to curate: add ideas (they compete with the AI's), dismiss proposals permanently, restore failed
+or dismissed ones. Every stage record, sprint and task belongs to its cycle, so history is never overwritten; requirements and
+architecture from the original build (or recovered during assessment) stay available to every later cycle.
+
+### Existing repositories — assess, then improve; never rebuild
+
+Give a project a repository URL (optionally a branch; language can be *Auto-detect*) and the first stage,
+**Import & Assessment**, runs before anything is generated:
 
 1. **Import** — `git clone` (shallow) into the workspace. Only `https://`, `ssh://`, `git@…` sources are accepted;
    local paths only under `FACTORY_IMPORT_LOCAL_ROOTS`. For private GitHub repos over HTTPS set `GITHUB_TOKEN`
@@ -89,18 +137,16 @@ stage, **Import & Assessment**, runs before anything is generated:
 2. **Inventory** — facts gathered by tooling: stack/framework from manifests, README/docs, test files, CI workflows,
    TODO count, recent commits; the most useful files are mirrored into the project so agents can read them.
 3. **Baseline** — the repository's own tests are run once, in a container, before anything is touched
-   (`FACTORY_IMPORT_BASELINE=false` to skip).
-4. **Assessment** — the `project-assessor` skill judges each stage `complete | partial | missing` with evidence,
-   recovers requirements/architecture documents it can, and lists **only the remaining gaps** as tasks
-   (`feature` = new behaviour; `characterization` = existing untested behaviour).
-5. **You confirm** — a *Confirm starting point* card shows the findings and a recommended stage; pick another stage
-   to override, or reject with a note to re-assess. Stages before the chosen one are marked satisfied; nothing in
-   them is regenerated.
+   (`FACTORY_IMPORT_BASELINE=false` to skip; the same health check runs at the start of every survey).
+4. **Assessment** — the `project-assessor` skill judges requirements / architecture / implementation / QA / deployment as
+   `complete | partial | missing` with evidence, and recovers requirements and architecture documents where it can.
+5. **You confirm** — a *Confirm assessment* card shows the findings. Confirming does **not** run the build lifecycle:
+   recovered documents become project knowledge, and every gap (missing docs, no CI, untested code, unbuilt features the
+   assessor found) becomes a **backlog proposal for cycle 1**. The first survey then adds its own and you choose what to build.
+   Rejecting with a note re-assesses.
 
-From there the normal pipeline runs with the existing code as context (requirements/architecture/task prompts are told
-to document and extend what exists). *Characterization* tasks have no red phase — their tests must **pass** against the
-current code, which then protects it during later work. The repository's own CI workflows are never overwritten; only
-missing ones are added. Deployment approval commits locally on the cloned branch; nothing is pushed.
+*Characterization* work (existing behaviour with no tests) has no red phase — those tests must **pass** against the current
+code, which then protects it during later cycles.
 
 ### Strict TDD, enforced in code (`app/Services/Pipeline/TddEngine.php`)
 

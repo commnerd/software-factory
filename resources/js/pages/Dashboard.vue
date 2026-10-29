@@ -4,7 +4,9 @@ import PageHeader from '../Components/PageHeader.vue';
 import PipelineStepper from '../Components/PipelineStepper.vue';
 import StatusBadge from '../Components/StatusBadge.vue';
 
-defineProps({ stats: Object, stages: Array, projects: Array, gates: Array, activity: Array });
+defineProps({ stats: Object, projects: Array, gates: Array, activity: Array });
+
+const mode = (p) => (p.lifecycle === 'improve' ? `improvement · cycle ${p.cycle}` : p.status === 'idle' ? 'released · ready to improve' : 'new build');
 
 usePoll(5000);
 
@@ -42,10 +44,10 @@ const tiles = (s) => [
                     <div class="mb-3 flex items-center justify-between">
                         <Link :href="`/projects/${p.id}`" class="font-medium text-stone-900 hover:text-amber-700">{{ p.name }}</Link>
                         <div class="flex items-center gap-3 text-xs text-stone-500">
-                            <span>{{ p.language }}</span><span>${{ p.spent_usd.toFixed(2) }}</span><StatusBadge :status="p.status" />
+                            <span>{{ mode(p) }}</span><span>{{ p.language }}</span><span>${{ p.spent_usd.toFixed(2) }}</span><StatusBadge :status="p.status" />
                         </div>
                     </div>
-                    <PipelineStepper :stages="stages" :current="p.current_stage" :project-status="p.status" compact />
+                    <PipelineStepper :stages="p.stages" :current="p.current_stage" :project-status="p.status" compact />
                 </li>
             </ul>
         </section>

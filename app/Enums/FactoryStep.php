@@ -9,6 +9,8 @@ namespace App\Enums;
 enum FactoryStep: string
 {
     case ProjectAssessment = 'project_assessment';
+    case FeatureSurvey = 'feature_survey';
+    case CycleRetrospective = 'cycle_retrospective';
     case RequirementsAnalysis = 'requirements_analysis';
     case ArchitectureDesign = 'architecture_design';
     case TaskBreakdown = 'task_breakdown';
@@ -25,6 +27,8 @@ enum FactoryStep: string
     {
         return match ($this) {
             self::ProjectAssessment => 'Existing-code assessment',
+            self::FeatureSurvey => 'Survey: propose improvements',
+            self::CycleRetrospective => 'Cycle retrospective',
             self::RequirementsAnalysis => 'Requirements analysis',
             self::ArchitectureDesign => 'Architecture design',
             self::TaskBreakdown => 'Task breakdown',
@@ -43,6 +47,8 @@ enum FactoryStep: string
     {
         return match ($this) {
             self::ProjectAssessment => SdlcStage::Assessment,
+            self::FeatureSurvey => SdlcStage::Survey,
+            self::CycleRetrospective => SdlcStage::Retrospective,
             self::RequirementsAnalysis => SdlcStage::Requirements,
             self::ArchitectureDesign => SdlcStage::Architecture,
             self::TaskBreakdown => SdlcStage::TaskBreakdown,
@@ -57,9 +63,9 @@ enum FactoryStep: string
     public function defaultTier(): ModelTier
     {
         return match ($this) {
-            self::RequirementsAnalysis, self::TaskBreakdown, self::CiWorkflow, self::DeploymentPrep => ModelTier::Cheap,
+            self::RequirementsAnalysis, self::TaskBreakdown, self::CiWorkflow, self::DeploymentPrep, self::CycleRetrospective => ModelTier::Cheap,
             self::TddRefactor, self::QaReview, self::ProjectAssessment => ModelTier::Standard,
-            self::ArchitectureDesign, self::TddRed, self::TddGreen, self::SelfAnalysis, self::SelfImplementation => ModelTier::Frontier,
+            self::FeatureSurvey, self::ArchitectureDesign, self::TddRed, self::TddGreen, self::SelfAnalysis, self::SelfImplementation => ModelTier::Frontier,
         };
     }
 

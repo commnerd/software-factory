@@ -6,6 +6,7 @@ use App\Enums\GateType;
 use App\Enums\SdlcStage;
 use App\Enums\TddPhase;
 use App\Models\ApprovalGate;
+use App\Models\ImprovementProposal;
 use App\Services\SelfIteration\SelfIterationService;
 
 /** Turns a human decision into the next pipeline action. */
@@ -23,8 +24,12 @@ class GateDecisionHandler
 
         match ($gate->type) {
             GateType::AssessmentReview => $approved
-                ? $this->confirmAssessment($gate, $data)
+                ? $this->confirmAssessment($gate)
                 : $this->pipeline->rerunStage($project, SdlcStage::Assessment, $gate->decision_note),
+
+            GateType::BacklogSelection => $approved
+                ? $this->selectBacklog($gate, $data)
+                : $this->pipeline->rerunStage($project, SdlcStage::Survey, $gate->decision_note),
 
             GateType::ArchitectureApproval => $approved
                 ? $this->pipeline->completeStage($project, SdlcStage::Architecture)
@@ -46,18 +51,36 @@ class GateDecisionHandler
         };
     }
 
-    /** The reviewer accepted (or overrode) the starting point: skip what exists, resume from there. */
-    private function confirmAssessment(ApprovalGate $gate, array $data): void
+    /** Assessment confirmed: seed cycle 1's backlog from the findings and start improving. */
+    private function confirmAssessment(ApprovalGate $gate): void
     {
         $project = $gate->project;
-        $override = isset($data['start_stage']) ? SdlcStage::tryFrom($data['start_stage']) : null;
 
-        if ($override === SdlcStage::Assessment) {
-            $override = null;
+        $this->planner->apply($project);
+        $this->pipeline->enterImprovement($project);
+        $this->pipeline->resume($project);
+    }
+
+    /**
+     * The cycle's human decision. Chosen proposals are approved for building; the rest of the open
+     * backlog is deferred (kept, not lost). Choosing nothing closes the cycle without building.
+     */
+    private function selectBacklog(ApprovalGate $gate, array $data): void
+    {
+        $project = $gate->project;
+        $open = $project->proposals()->whereIn('status', ImprovementProposal::OPEN)->pluck('id')->all();
+        $chosen = array_values(array_intersect($open, array_map('intval', (array) ($data['selected_ids'] ?? []))));
+
+        $project->proposals()->whereIn('id', $chosen)->update(['status' => 'approved', 'decision_note' => $gate->decision_note]);
+        $project->proposals()->whereIn('id', array_diff($open, $chosen))->update(['status' => 'deferred']);
+
+        if ($chosen === []) {
+            $this->pipeline->skipCycle($project, 'no proposals were selected');
+
+            return;
         }
 
-        $this->planner->apply($project, $override);
-        $this->pipeline->resume($project);
+        $this->pipeline->completeStage($project, SdlcStage::Backlog);
     }
 
     private function raiseBudgetAndResume(ApprovalGate $gate, array $data): void
@@ -82,7 +105,7 @@ class GateDecisionHandler
             }
 
             // Send blocked/unfinished work back through TDD.
-            $project->tasks()->where('tdd_phase', TddPhase::Blocked->value)->update(['tdd_phase' => TddPhase::Pending->value, 'status' => 'pending', 'attempts' => 0]);
+            $project->cycleTasks()->where('tdd_phase', TddPhase::Blocked->value)->update(['tdd_phase' => TddPhase::Pending->value, 'status' => 'pending', 'attempts' => 0]);
             $project->update(['current_stage' => SdlcStage::TddImplementation]);
             $this->pipeline->resume($project);
 

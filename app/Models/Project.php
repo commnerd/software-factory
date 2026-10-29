@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\Lifecycle;
 use App\Enums\SdlcStage;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -12,7 +13,9 @@ class Project extends Model
     protected $guarded = [];
 
     protected $attributes = [
-        'status' => 'draft',
+        'status' => 'draft',          // draft|running|awaiting_approval|paused|failed|idle (released, waiting for the next cycle)
+        'lifecycle' => 'build',
+        'cycle' => 0,
         'current_stage' => 'assessment',
         'spent_usd' => 0,
     ];
@@ -23,9 +26,12 @@ class Project extends Model
             'config' => 'array',
             'assessment' => 'array',
             'existing_code' => 'boolean',
+            'lifecycle' => Lifecycle::class,
             'current_stage' => SdlcStage::class,
             'budget_limit_usd' => 'decimal:2',
             'spent_usd' => 'decimal:4',
+            'cycle_started_at' => 'datetime',
+            'last_cycle_completed_at' => 'datetime',
         ];
     }
 
@@ -37,8 +43,8 @@ class Project extends Model
         });
 
         static::created(function (Project $p) {
-            foreach (SdlcStage::cases() as $stage) {
-                $p->stages()->create(['stage' => $stage->value]);
+            foreach (SdlcStage::sequence(Lifecycle::Build) as $stage) {
+                $p->stages()->create(['stage' => $stage->value, 'cycle' => 0]);
             }
         });
     }
@@ -56,6 +62,11 @@ class Project extends Model
     public function tasks(): HasMany
     {
         return $this->hasMany(ProjectTask::class)->orderBy('position');
+    }
+
+    public function proposals(): HasMany
+    {
+        return $this->hasMany(ImprovementProposal::class);
     }
 
     public function testSuites(): HasMany
@@ -83,9 +94,26 @@ class Project extends Model
         return $this->hasMany(ModelRoute::class);
     }
 
-    public function stage(SdlcStage $stage): ProjectStage
+    /** The stage record for the current cycle (created on demand). */
+    public function stage(SdlcStage $stage, ?int $cycle = null): ProjectStage
     {
-        return $this->stages()->firstOrCreate(['stage' => $stage->value]);
+        return $this->stages()->firstOrCreate(['stage' => $stage->value, 'cycle' => $cycle ?? $this->cycle]);
+    }
+
+    /**
+     * The latest non-empty output of a stage across cycles. Requirements/architecture are produced once
+     * (cycle 0, or recovered during assessment) but every later cycle needs them as context.
+     */
+    public function knowledge(SdlcStage $stage): string
+    {
+        return (string) $this->stages()->where('stage', $stage->value)->whereNotNull('output')->where('output', '!=', '')
+            ->orderByDesc('cycle')->value('output');
+    }
+
+    /** Tasks belonging to the cycle that is currently being worked. */
+    public function cycleTasks(): HasMany
+    {
+        return $this->tasks()->where('cycle', $this->cycle);
     }
 
     public function budgetExceeded(): bool
@@ -103,5 +131,11 @@ class Project extends Model
         $overrides = array_filter($this->config ?? [], fn ($v) => $v !== null && $v !== '');
 
         return array_merge($base, $overrides);
+    }
+
+    /** @return list<SdlcStage> */
+    public function sequence(): array
+    {
+        return SdlcStage::sequence($this->lifecycle);
     }
 }

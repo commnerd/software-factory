@@ -77,6 +77,18 @@ return [
         'github_token' => env('GITHUB_TOKEN'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Continuous improvement
+    |--------------------------------------------------------------------------
+    | After a build ships (or an existing repo is assessed) the project runs numbered
+    | cycles: survey → choose → plan → TDD → QA → release → retrospective.
+    */
+    'improvement' => [
+        // How many proposals the Backlog Review pre-selects (the human can tick more or fewer).
+        'cycle_capacity' => (int) env('FACTORY_CYCLE_CAPACITY', 3),
+    ],
+
     'default_budget_usd' => (float) env('FACTORY_DEFAULT_BUDGET_USD', 25),
     'budget_raise_usd' => (float) env('FACTORY_BUDGET_RAISE_USD', 25),
 

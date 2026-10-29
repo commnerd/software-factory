@@ -42,6 +42,11 @@ class ProjectTask extends Model
         return $this->hasMany(TestSuite::class);
     }
 
+    public function proposal(): BelongsTo
+    {
+        return $this->belongsTo(ImprovementProposal::class, 'improvement_proposal_id');
+    }
+
     public function setPhase(TddPhase $phase): void
     {
         $this->update(['tdd_phase' => $phase, 'status' => match ($phase) {

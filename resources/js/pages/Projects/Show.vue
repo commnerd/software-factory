@@ -11,9 +11,12 @@ import AgentLogTab from '../../Components/Project/AgentLogTab.vue';
 import FilesTab from '../../Components/Project/FilesTab.vue';
 import ModelsTab from '../../Components/Project/ModelsTab.vue';
 import SettingsTab from '../../Components/Project/SettingsTab.vue';
+import BacklogTab from '../../Components/Project/BacklogTab.vue';
 
 const props = defineProps({
     project: Object,
+    proposals: Array,
+    cycles: Array,
     stages: Array,
     sprints: Array,
     testSuites: Array,
@@ -30,6 +33,7 @@ const props = defineProps({
 const tab = ref('pipeline');
 const tabs = computed(() => [
     { key: 'pipeline', label: 'Pipeline' },
+    { key: 'backlog', label: `Backlog (${props.proposals.filter((p) => ['proposed', 'deferred'].includes(p.status)).length})` },
     { key: 'tasks', label: `Tasks (${props.sprints.reduce((n, s) => n + s.tasks.length, 0)})` },
     { key: 'tests', label: `Tests (${props.testSuites.length})` },
     { key: 'agents', label: `Agent log (${props.agentRuns.length})` },
@@ -41,14 +45,21 @@ const tabs = computed(() => [
 // Live view: poll while the pipeline is doing something.
 const { start, stop } = usePoll(
     2500,
-    { only: ['project', 'stages', 'sprints', 'testSuites', 'agentRuns', 'gates', 'files'] },
+    { only: ['project', 'stages', 'sprints', 'testSuites', 'agentRuns', 'gates', 'files', 'proposals', 'cycles'] },
     { autoStart: false },
 );
 watch(() => props.project.status, (s) => (s === 'running' ? start() : stop()), { immediate: true });
 
 const pendingGates = computed(() => props.gates.filter((g) => g.status === 'pending'));
 const decidedGates = computed(() => props.gates.filter((g) => g.status !== 'pending'));
-const canStart = computed(() => !['running', 'awaiting_approval', 'completed'].includes(props.project.status));
+const idle = computed(() => props.project.status === 'idle');
+const canStart = computed(() => !['running', 'awaiting_approval', 'idle'].includes(props.project.status));
+const modeLabel = computed(() => {
+    const p = props.project;
+    if (p.lifecycle === 'improve') return `Continuous improvement · cycle ${p.cycle}`;
+    return idle.value ? 'First build released' : 'New build';
+});
+const nextCycle = computed(() => props.project.cycle + 1);
 const budgetPct = computed(() => Math.min(100, props.project.budget_limit_usd ? (props.project.spent_usd / props.project.budget_limit_usd) * 100 : 0));
 const openStage = ref(null);
 
@@ -61,8 +72,17 @@ const action = (path) => router.post(`/projects/${props.project.id}/${path}`, {}
     <PageHeader :title="project.name" :subtitle="`${project.language}${project.framework ? ' · ' + project.framework : ''}  ·  ${project.slug}`">
         <StatusBadge :status="project.status" />
         <button v-if="canStart" class="btn-primary" @click="action('start')">{{ project.status === 'draft' ? 'Start pipeline' : 'Resume' }}</button>
+        <button v-if="idle" class="btn-primary" @click="action('cycle')">Start improvement cycle {{ nextCycle }}</button>
         <button v-if="project.status === 'running'" class="btn-secondary" @click="action('pause')">Pause</button>
     </PageHeader>
+
+    <div class="-mt-3 mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <span class="rounded-full bg-stone-900 px-3 py-1 text-xs font-semibold text-white">{{ modeLabel }}</span>
+        <span v-if="idle" class="text-stone-600">
+            Released {{ project.last_cycle_completed_at }}. The next cycle surveys the code afresh and proposes what to improve — you choose what gets built.
+        </span>
+        <span v-if="project.cycle_interval_days" class="text-xs text-stone-500">auto-starts every {{ project.cycle_interval_days }} day(s) when idle</span>
+    </div>
 
     <div v-if="project.last_error" class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
         <b>{{ project.status === 'failed' ? 'Pipeline failed:' : 'Note:' }}</b> {{ project.last_error }}
@@ -126,6 +146,7 @@ const action = (path) => router.post(`/projects/${props.project.id}/${path}`, {}
         </div>
     </div>
 
+    <BacklogTab v-else-if="tab === 'backlog'" :project="project" :proposals="proposals" :cycles="cycles" />
     <TasksTab v-else-if="tab === 'tasks'" :sprints="sprints" />
     <TestsTab v-else-if="tab === 'tests'" :suites="testSuites" />
     <AgentLogTab v-else-if="tab === 'agents'" :runs="agentRuns" />

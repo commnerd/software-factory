@@ -22,6 +22,8 @@ const styles = {
     error: 'bg-red-100 text-red-800',
     blocked: 'bg-red-100 text-red-800',
     rejected: 'bg-red-100 text-red-800',
+    idle: 'bg-teal-100 text-teal-800',
+    deferred: 'bg-stone-200 text-stone-600',
     // tdd
     red: 'bg-red-100 text-red-800',
     green: 'bg-emerald-100 text-emerald-800',

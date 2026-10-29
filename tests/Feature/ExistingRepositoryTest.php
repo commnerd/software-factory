@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\GateType;
+use App\Enums\Lifecycle;
 use App\Enums\SdlcStage;
 use App\Exceptions\FactoryException;
 use App\Models\AgentRun;
@@ -14,7 +15,7 @@ use App\Services\Pipeline\PipelineOrchestrator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-/** Projects created from a repository that already has code must not be built from scratch. */
+/** A repository that already has code is assessed, then improved in cycles — never rebuilt from scratch. */
 class ExistingRepositoryTest extends TestCase
 {
     use RefreshDatabase;
@@ -44,9 +45,7 @@ class ExistingRepositoryTest extends TestCase
 
     private function create(array $files, array $attrs = []): Project
     {
-        return Project::create($attrs + [
-            'name' => 'Imported', 'language' => 'auto', 'repository_url' => $this->makeRepo($files),
-        ]);
+        return Project::create($attrs + ['name' => 'Imported', 'language' => 'auto', 'repository_url' => $this->makeRepo($files)]);
     }
 
     private function gate(Project $project, GateType $type): ApprovalGate
@@ -54,14 +53,16 @@ class ExistingRepositoryTest extends TestCase
         return $project->gates()->where('status', 'pending')->where('type', $type->value)->latest('id')->firstOrFail();
     }
 
-    public function test_greenfield_project_skips_assessment_entirely(): void
+    public function test_greenfield_project_skips_assessment_and_follows_the_build_lifecycle(): void
     {
         $project = Project::create(['name' => 'New', 'brief' => 'x', 'language' => 'php']);
         app(PipelineOrchestrator::class)->start($project);
 
         $this->assertSame('completed', $project->stage(SdlcStage::Assessment)->status);
         $this->assertFalse($project->fresh()->existing_code);
+        $this->assertSame(Lifecycle::Build, $project->fresh()->lifecycle);
         $this->assertDatabaseMissing('agent_runs', ['step' => 'project_assessment']);
+        $this->assertDatabaseMissing('agent_runs', ['step' => 'feature_survey']);
         $this->assertSame(SdlcStage::Architecture, $project->fresh()->current_stage);
     }
 
@@ -74,7 +75,7 @@ class ExistingRepositoryTest extends TestCase
         $this->assertDatabaseMissing('agent_runs', ['step' => 'project_assessment']);
     }
 
-    public function test_existing_code_is_imported_assessed_and_confirmed_before_anything_is_built(): void
+    public function test_existing_code_is_imported_and_assessed_but_nothing_is_built_until_confirmed(): void
     {
         $project = $this->create($this->mature());
         app(PipelineOrchestrator::class)->start($project);
@@ -84,24 +85,21 @@ class ExistingRepositoryTest extends TestCase
         $this->assertSame(SdlcStage::Assessment, $project->current_stage);
         $this->assertTrue($project->existing_code);
 
-        // imported + detected, nothing generated yet
         $this->assertSame('php', $project->language, 'auto-detected from composer.json');
         $this->assertSame('Laravel', $project->framework);
         $this->assertTrue($project->artifacts()->where('path', 'src/Invoice.php')->exists());
-        $this->assertDatabaseMissing('agent_runs', ['step' => 'requirements_analysis']);
-        $this->assertSame(0, $project->tasks()->count());
+        $this->assertSame('passed', $project->testSuites()->where('phase', 'baseline')->value('status'));
 
-        // facts reached the assessor
         $prompt = AgentRun::where('step', 'project_assessment')->value('prompt');
         $this->assertStringContainsString('"test_file_count": 1', $prompt);
         $this->assertStringContainsString('.github/workflows/ci.yml', $prompt);
-        $this->assertSame('passed', $project->testSuites()->where('phase', 'baseline')->value('status'));
 
-        $gate = $this->gate($project, GateType::AssessmentReview);
-        $this->assertSame('qa', $gate->payload['recommended_stage'], 'docs, tests and CI exist and nothing is missing');
+        foreach (['requirements_analysis', 'architecture_design', 'feature_survey', 'tdd_red'] as $step) {
+            $this->assertDatabaseMissing('agent_runs', ['step' => $step]);
+        }
     }
 
-    public function test_a_complete_repository_resumes_at_qa_without_regenerating_anything(): void
+    public function test_confirming_the_assessment_skips_the_build_lifecycle_and_starts_improvement_cycle_one(): void
     {
         $project = $this->create($this->mature());
         app(PipelineOrchestrator::class)->start($project);
@@ -109,57 +107,40 @@ class ExistingRepositoryTest extends TestCase
         app(GateService::class)->decide($this->gate($project, GateType::AssessmentReview), true);
 
         $project->refresh();
-        // QA ran, then the pipeline stopped at the deployment gate
-        $this->assertSame(SdlcStage::DeploymentPrep, $project->current_stage);
+        $this->assertSame(Lifecycle::Improve, $project->lifecycle);
+        $this->assertSame(1, $project->cycle);
+        $this->assertSame(SdlcStage::Backlog, $project->current_stage, 'surveyed, now waiting for the human to choose');
         $this->assertSame('awaiting_approval', $project->status);
 
-        foreach (['requirements_analysis', 'architecture_design', 'task_breakdown', 'tdd_red', 'tdd_green', 'tdd_refactor'] as $step) {
+        // The build stages never run for an imported project.
+        foreach (['requirements_analysis', 'architecture_design'] as $step) {
             $this->assertDatabaseMissing('agent_runs', ['step' => $step]);
         }
-        $this->assertDatabaseHas('agent_runs', ['step' => 'qa_review']);
+        $this->assertDatabaseHas('agent_runs', ['step' => 'feature_survey']);
 
-        // documents recovered from the repo are carried forward
-        $this->assertStringContainsString('reverse-engineered', $project->stage(SdlcStage::Requirements)->output);
-        $this->assertStringContainsString('Architecture (from docs/)', $project->stage(SdlcStage::Architecture)->output);
-        $this->assertSame('completed', $project->stage(SdlcStage::TddImplementation)->status);
+        // Documents recovered from the repo are carried forward as project knowledge.
+        $this->assertStringContainsString('reverse-engineered', $project->knowledge(SdlcStage::Requirements));
+        $this->assertStringContainsString('Architecture (from docs/)', $project->knowledge(SdlcStage::Architecture));
 
-        // the repo's own CI is left alone; only the missing deploy workflow is added
-        $ci = file_get_contents(app(\App\Services\Execution\Workspace::class)->path($project).'/.github/workflows/ci.yml');
-        $this->assertSame("name: CI\njobs:\n  t:\n    runs-on: ubuntu-latest\n", $ci);
-        $this->assertTrue($project->artifacts()->where('path', '.github/workflows/deploy.yml')->exists());
-        $this->assertStringContainsString('existing workflows kept untouched: .github/workflows/ci.yml', $this->gate($project, GateType::Deployment)->summary);
+        // Survey prompt carries the real code facts, and the vision-less project is still surveyed.
+        $prompt = AgentRun::where('step', 'feature_survey')->value('prompt');
+        $this->assertStringContainsString('Improvement cycle: 1', $prompt);
+        $this->assertStringContainsString('"test_file_count": 1', $prompt);
     }
 
-    public function test_a_bare_repository_starts_at_requirements_and_feeds_the_code_into_the_prompts(): void
+    public function test_assessment_gaps_become_backlog_proposals(): void
     {
-        $project = $this->create($this->bare());
+        $project = $this->create(['README.md' => '# App', 'composer.json' => '{}', 'src/Legacy.php' => '<?php']);
         app(PipelineOrchestrator::class)->start($project);
+        app(GateService::class)->decide($this->gate($project, GateType::AssessmentReview), true);
 
-        $gate = $this->gate($project, GateType::AssessmentReview);
-        $this->assertSame('requirements', $gate->payload['recommended_stage']);
+        $titles = $project->proposals()->where('source', 'assessment')->pluck('title')->all();
 
-        app(GateService::class)->decide($gate, true);
-
-        $project->refresh();
-        $this->assertSame(SdlcStage::Architecture, $project->current_stage, 'requirements ran, now waiting on architecture approval');
-
-        $prompt = AgentRun::where('step', 'requirements_analysis')->value('prompt');
-        $this->assertStringContainsString('imported from an existing repository', $prompt);
-        $this->assertStringContainsString('Do NOT start from scratch', $prompt);
-
-        app(GateService::class)->decide($this->gate($project, GateType::ArchitectureApproval), true);
-        $this->assertStringContainsString('plan ONLY the remaining delta', AgentRun::where('step', 'task_breakdown')->value('prompt'));
-    }
-
-    public function test_the_reviewer_can_override_the_starting_stage(): void
-    {
-        $project = $this->create($this->mature());
-        app(PipelineOrchestrator::class)->start($project);
-
-        app(GateService::class)->decide($this->gate($project, GateType::AssessmentReview), true, null, 'tester', ['start_stage' => 'requirements']);
-
-        $this->assertDatabaseHas('agent_runs', ['step' => 'requirements_analysis']);
-        $this->assertSame(SdlcStage::Architecture, $project->fresh()->current_stage);
+        $this->assertContains('Characterize existing behaviour', $titles);
+        $this->assertContains('Add missing feature', $titles);
+        $this->assertContains('Document the architecture', $titles, 'no docs/ => a docs proposal');
+        $this->assertContains('Add a CI pipeline', $titles);
+        $this->assertSame('tests', $project->proposals()->where('title', 'Characterize existing behaviour')->value('category'));
     }
 
     public function test_rejecting_the_assessment_reassesses_with_the_reviewers_note(): void
@@ -172,29 +153,6 @@ class ExistingRepositoryTest extends TestCase
         $this->assertSame(2, AgentRun::where('step', 'project_assessment')->count());
         $this->assertStringContainsString('The payments module is unfinished', AgentRun::where('step', 'project_assessment')->latest('id')->value('prompt'));
         $this->assertSame(2, $project->gates()->where('type', GateType::AssessmentReview->value)->count());
-    }
-
-    public function test_untested_code_becomes_characterization_tasks_that_do_not_need_a_red_phase(): void
-    {
-        $files = ['README.md' => '# App', 'docs/design.md' => '# D', 'composer.json' => '{}', 'src/Legacy.php' => '<?php'];
-        $project = $this->create($files);
-        app(PipelineOrchestrator::class)->start($project);
-
-        $gate = $this->gate($project, GateType::AssessmentReview);
-        $this->assertSame('tdd_implementation', $gate->payload['recommended_stage'], 'docs exist; only gap tasks remain');
-
-        app(GateService::class)->decide($gate, true);
-
-        $project->refresh();
-        $this->assertSame(SdlcStage::DeploymentPrep, $project->current_stage);
-
-        $char = $project->tasks()->where('type', 'characterization')->firstOrFail();
-        $feature = $project->tasks()->where('type', 'feature')->firstOrFail();
-        $this->assertSame('done', $char->tdd_phase->value);
-        $this->assertSame(['characterize'], $char->testSuites()->pluck('phase')->all());
-        $this->assertSame(['tdd_red'], AgentRun::where('project_task_id', $char->id)->pluck('step')->all(), 'existing behaviour: tests only, no implementation');
-
-        $this->assertSame(['red', 'green', 'refactor'], $feature->testSuites()->orderBy('id')->pluck('phase')->all());
     }
 
     public function test_importer_refuses_unsafe_sources(): void

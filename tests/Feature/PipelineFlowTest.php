@@ -61,8 +61,11 @@ class PipelineFlowTest extends TestCase
         app(GateService::class)->decide($this->pendingGate($project, GateType::Deployment), true);
 
         $project->refresh();
-        $this->assertSame('completed', $project->status);
+        // A finished build is not "done": the project idles, ready for continuous improvement.
+        $this->assertSame('idle', $project->status);
         $this->assertSame('completed', $project->stage(SdlcStage::DeploymentPrep)->status);
+        $this->assertNotNull($project->last_cycle_completed_at);
+        $this->assertSame(0, $project->cycle);
     }
 
     public function test_tdd_order_is_red_then_green_then_refactor_per_task(): void

@@ -3,12 +3,13 @@
 namespace App\Services\Pipeline;
 
 use App\Enums\SdlcStage;
+use App\Models\ImprovementProposal;
 use App\Models\Project;
 use App\Models\TestSuite;
 
 /**
- * Turns the AI's judgement (plus hard facts from the import) into a plan:
- * which SDLC stages are already satisfied by the repository, and where to resume.
+ * Turns the AI's judgement (plus hard facts from the import) into a plan, then — once a human confirms —
+ * seeds the first improvement cycle with what the assessment found.
  *
  * Plan shape (stored in projects.assessment):
  *   summary, detected{language,framework}, risks[], baseline{status,passed,total},
@@ -57,7 +58,7 @@ class AssessmentPlanner
         }
 
         return [
-            'summary' => (string) ($ai['summary'] ?? 'Existing repository imported; AI assessment was unavailable so the factory will rebuild missing documents conservatively.'),
+            'summary' => (string) ($ai['summary'] ?? 'Existing repository imported; AI assessment was unavailable, so the first survey will work from the code alone.'),
             'detected' => [
                 'language' => $ai['detected']['language'] ?? $inventory['detected']['language'] ?? null,
                 'framework' => $ai['detected']['framework'] ?? $inventory['detected']['framework'] ?? null,
@@ -71,72 +72,74 @@ class AssessmentPlanner
     }
 
     /**
-     * The first stage that still has work to do.
-     *  - requirements / architecture documents missing -> (re)produce them, using the code as input
-     *  - gap tasks listed -> go straight to TDD for just those
-     *  - nothing left to build -> QA
-     *  - otherwise let the task breakdown plan the remaining delta
+     * Assessment confirmed. Imported code is not a build: carry its documents forward as project
+     * knowledge and turn every gap into a backlog proposal for cycle 1 (the survey adds more).
+     *
+     * @return list<ImprovementProposal>
      */
-    public function startStage(array $plan): SdlcStage
-    {
-        $s = $plan['stages'];
-
-        return match (true) {
-            $s['requirements']['status'] !== 'complete' => SdlcStage::Requirements,
-            $s['architecture']['status'] !== 'complete' => SdlcStage::Architecture,
-            $plan['tasks'] !== [] => SdlcStage::TddImplementation,
-            $s['implementation']['status'] === 'complete' => SdlcStage::Qa,
-            default => SdlcStage::TaskBreakdown,
-        };
-    }
-
-    /** Mark everything before $start as satisfied, import usable documents, create gap tasks. */
-    public function apply(Project $project, ?SdlcStage $override = null): SdlcStage
+    public function apply(Project $project): array
     {
         $plan = $project->assessment;
-        $start = $override ?? $this->startStage($plan);
-        $order = array_map(fn (SdlcStage $s) => $s->value, SdlcStage::cases());
-        $startIndex = array_search($start->value, $order, true);
 
-        $documents = [
-            SdlcStage::Requirements->value => $plan['stages']['requirements']['document'] ?? null,
-            SdlcStage::Architecture->value => $plan['stages']['architecture']['document'] ?? null,
+        foreach ([[SdlcStage::Requirements, 'requirements'], [SdlcStage::Architecture, 'architecture']] as [$stage, $key]) {
+            if (! empty($plan['stages'][$key]['document'])) {
+                $project->stage($stage, 0)->markCompleted($plan['stages'][$key]['document']);
+            }
+        }
+        $project->stage(SdlcStage::Assessment, 0)->markCompleted();
+
+        $seeds = [];
+
+        foreach ($plan['tasks'] as $t) {
+            $characterize = $t['type'] === 'characterization';
+            $seeds[] = [
+                'title' => $t['title'],
+                'category' => $characterize ? 'tests' : 'feature',
+                'summary' => $t['description'],
+                'rationale' => 'Gap found while assessing the imported repository.',
+                'acceptance_criteria' => $t['acceptance_criteria'],
+                'files' => $t['files'],
+                'impact' => $characterize ? 3 : 4,
+                'effort' => $characterize ? 2 : 3,
+            ];
+        }
+
+        $gaps = [
+            ['requirements', 'Document the product requirements', 'docs', 'The goals and functional requirements are not written down; recover them from the code.'],
+            ['architecture', 'Document the architecture', 'docs', 'No design documentation: describe components, data flow and key decisions.'],
+            ['deployment', 'Add a CI pipeline', 'devex', 'No build/test pipeline was found in the repository.'],
         ];
+        foreach ($gaps as [$key, $title, $category, $why]) {
+            $status = $plan['stages'][$key]['status'] ?? 'complete';
 
-        foreach (SdlcStage::cases() as $i => $stage) {
-            $record = $project->stage($stage);
-
-            if ($i < $startIndex) {
-                $record->markCompleted($documents[$stage->value] ?? match ($stage) {
-                    SdlcStage::Assessment => $record->output,
-                    SdlcStage::TaskBreakdown => 'Skipped — remaining work was taken directly from the assessment.',
-                    SdlcStage::TddImplementation => 'Skipped — nothing left to implement according to the assessment.',
-                    default => 'Skipped — already satisfied by the existing repository.',
-                });
+            // Documents must be *complete* to count; a pipeline only has to exist.
+            if ($key === 'deployment' ? $status === 'missing' : $status !== 'complete') {
+                $seeds[] = ['title' => $title, 'category' => $category, 'summary' => $why, 'rationale' => $why, 'impact' => 3, 'effort' => 1,
+                    'acceptance_criteria' => [$title.' is committed and reviewed.'], 'files' => []];
             }
         }
 
-        // Gap tasks only matter if we are about to implement them.
-        if ($start === SdlcStage::TddImplementation && $plan['tasks'] !== [] && $project->tasks()->count() === 0) {
-            $sprint = $project->sprints()->create([
-                'name' => 'Existing codebase — remaining work',
-                'goal' => 'Close the gaps found when assessing the imported repository.',
-                'position' => 0,
-            ]);
-
-            foreach ($plan['tasks'] as $i => $t) {
-                $project->tasks()->create($t + ['sprint_id' => $sprint->id, 'position' => $i + 1]);
-            }
+        if (($plan['stages']['qa']['status'] ?? 'missing') === 'missing' && ! collect($seeds)->contains('category', 'tests')) {
+            $seeds[] = ['title' => 'Add a baseline automated test suite', 'category' => 'tests', 'summary' => 'No automated tests were found; characterize the most important existing behaviour.',
+                'rationale' => 'Without tests nothing else can be changed safely.', 'impact' => 5, 'effort' => 3, 'acceptance_criteria' => ['Tests pass against the current code.'], 'files' => []];
         }
 
-        $project->update(['current_stage' => $start]);
+        $known = $project->proposals()->pluck('title')->map(fn ($t) => mb_strtolower($t))->all();
+        $created = [];
 
-        return $start;
+        foreach ($seeds as $seed) {
+            if (in_array(mb_strtolower($seed['title']), $known, true)) {
+                continue;
+            }
+            $created[] = $project->proposals()->create($seed + ['cycle' => 1, 'source' => 'assessment']);
+        }
+
+        return $created;
     }
 
     public function summaryMarkdown(array $plan, array $inventory): string
     {
-        $lines = ["# Assessment of the existing repository", '', $plan['summary'], ''];
+        $lines = ['# Assessment of the existing repository', '', $plan['summary'], ''];
 
         $lines[] = sprintf('**Detected:** %s%s · **Files:** %d · **Tests found:** %d · **CI workflows:** %d',
             $plan['detected']['language'] ?? 'unknown',
@@ -149,14 +152,14 @@ class AssessmentPlanner
         }
 
         $lines[] = '';
-        $lines[] = '## Stage status';
+        $lines[] = '## Where it stands';
         foreach ($plan['stages'] as $key => $s) {
             $lines[] = sprintf('- **%s**: %s%s', $key, $s['status'], ($s['evidence'] ?? '') !== '' ? ' — '.$s['evidence'] : '');
         }
 
         if ($plan['tasks']) {
             $lines[] = '';
-            $lines[] = '## Remaining work';
+            $lines[] = '## Gaps (will seed the first backlog)';
             foreach ($plan['tasks'] as $t) {
                 $lines[] = "- [{$t['type']}] {$t['title']}";
             }
@@ -171,7 +174,7 @@ class AssessmentPlanner
         }
 
         $lines[] = '';
-        $lines[] = '**Recommended starting point:** '.$this->startStage($plan)->label();
+        $lines[] = '**Next:** the project enters continuous improvement — the factory surveys the code for features and fixes to propose, and you choose what each cycle builds.';
 
         return implode("\n", $lines);
     }

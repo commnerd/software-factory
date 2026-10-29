@@ -34,7 +34,8 @@ class ApprovalGateController extends Controller
             'decision' => ['required', 'in:approve,reject'],
             'note' => ['nullable', 'string', 'max:2000'],
             'new_budget' => ['nullable', 'numeric', 'min:0'],
-            'start_stage' => ['nullable', \Illuminate\Validation\Rule::enum(\App\Enums\SdlcStage::class)],
+            'selected_ids' => ['nullable', 'array'],
+            'selected_ids.*' => ['integer'],
         ]);
 
         if (! $gate->isPending()) {
@@ -46,7 +47,7 @@ class ApprovalGateController extends Controller
             $data['decision'] === 'approve',
             $data['note'] ?? null,
             'dashboard',
-            array_filter(['new_budget' => $data['new_budget'] ?? null, 'start_stage' => $data['start_stage'] ?? null], fn ($v) => $v !== null),
+            array_filter(['new_budget' => $data['new_budget'] ?? null, 'selected_ids' => $data['selected_ids'] ?? null], fn ($v) => $v !== null),
         );
 
         return back()->with('success', $data['decision'] === 'approve' ? 'Approved — execution resumes.' : 'Rejected.');

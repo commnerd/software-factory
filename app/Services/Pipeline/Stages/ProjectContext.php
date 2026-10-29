@@ -27,7 +27,7 @@ class ProjectContext
 
     public static function stageOutput(Project $project, SdlcStage $stage): string
     {
-        return (string) $project->stage($stage)->output;
+        return $project->knowledge($stage);
     }
 
     /**
